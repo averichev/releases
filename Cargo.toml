@@ -1,0 +1,33 @@
+[package]
+name = "veruna-releases"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+anyhow = "1"
+axum = "0.8.9"
+config = { version = "0.15", default-features = false, features = ["toml"] }
+mime_guess = "2"
+rust-embed = { version = "8", features = ["debug-embed", "deterministic-timestamps"] }
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "fs", "time", "sync"] }
+tower-http = { version = "0.6", features = ["trace", "compression-gzip", "set-header"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+serde_json = "1"
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[lints.rust]
+unsafe_code = "forbid"
