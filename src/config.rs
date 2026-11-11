@@ -16,6 +16,7 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub storage: StorageConfig,
     pub logging: LoggingConfig,
+    pub auth: AuthConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,12 +38,37 @@ pub struct DatabaseConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct StorageConfig {
     pub directory: PathBuf,
+    pub icons_directory: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LoggingConfig {
     pub filter: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuthConfig {
+    pub public_origin: String,
+    pub session_ttl_seconds: i64,
+    pub invitation_ttl_seconds: i64,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            public_origin: "http://127.0.0.1:8080".into(),
+            session_ttl_seconds: 43_200,
+            invitation_ttl_seconds: 86_400,
+        }
+    }
+}
+
+impl AuthConfig {
+    pub fn secure_cookie(&self) -> bool {
+        self.public_origin.starts_with("https://")
+    }
 }
 
 impl Default for ServerConfig {
@@ -68,6 +94,7 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             directory: "data/artifacts".into(),
+            icons_directory: "data/icons".into(),
         }
     }
 }
@@ -122,6 +149,10 @@ impl AppConfig {
             "storage.directory must not be empty"
         );
         ensure!(
+            !self.storage.icons_directory.as_os_str().is_empty(),
+            "storage.icons_directory must not be empty"
+        );
+        ensure!(
             (1..=32).contains(&self.database.max_connections),
             "database.max_connections must be between 1 and 32"
         );
@@ -136,6 +167,25 @@ impl AppConfig {
         ensure!(
             !self.logging.filter.trim().is_empty(),
             "logging.filter must not be empty"
+        );
+        let origin =
+            url::Url::parse(&self.auth.public_origin).context("Invalid auth.public_origin")?;
+        ensure!(
+            origin.origin().ascii_serialization() == self.auth.public_origin
+                && origin.username().is_empty()
+                && origin.password().is_none()
+                && (origin.scheme() == "https"
+                    || (origin.scheme() == "http"
+                        && matches!(origin.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))),
+            "auth.public_origin must be an HTTPS origin, or HTTP on loopback, without path or trailing slash"
+        );
+        ensure!(
+            (60..=2_592_000).contains(&self.auth.session_ttl_seconds),
+            "auth.session_ttl_seconds must be between 60 and 2592000"
+        );
+        ensure!(
+            (60..=604_800).contains(&self.auth.invitation_ttl_seconds),
+            "auth.invitation_ttl_seconds must be between 60 and 604800"
         );
         tracing_subscriber::EnvFilter::try_new(&self.logging.filter)
             .context("Invalid logging.filter")?;

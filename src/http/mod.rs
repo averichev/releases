@@ -1,5 +1,7 @@
 mod admin;
+mod applications;
 mod assets;
+mod auth;
 mod error;
 mod health;
 
@@ -21,11 +23,19 @@ use error::ApiError;
 #[derive(Clone)]
 pub struct AppState {
     pub database: SqlitePool,
+    pub auth_config: crate::config::AuthConfig,
+    pub authentication: crate::services::auth::Authentication,
+    pub sessions: crate::services::sessions::Sessions,
+    pub users: crate::services::users::UserManagement,
+    pub applications: crate::services::applications::ApplicationCatalog,
 }
 
-pub fn router(database: SqlitePool) -> Router {
+pub fn router(state: AppState) -> Router {
     let public = Router::new().route("/health", get(health::get));
-    let v1 = public.merge(admin::router()).fallback(not_found);
+    let v1 = public
+        .nest("/auth", auth::router(state.clone()))
+        .merge(admin::router(state.clone()))
+        .fallback(not_found);
     let api = Router::new().nest("/v1", v1).fallback(not_found).layer(
         SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
@@ -38,14 +48,18 @@ pub fn router(database: SqlitePool) -> Router {
         .nest("/api", api)
         .fallback(assets::serve)
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
-        .with_state(AppState { database })
+        .layer(axum::extract::DefaultBodyLimit::max(8192))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth::same_origin))
+        .with_state(state)
+        .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
+        .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")))
         .layer(CompressionLayer::new())
         .layer(SetResponseHeaderLayer::if_not_present(
             header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(TraceLayer::new_for_http()
             // Avoid logging raw query strings, credentials and future signed URLs.
             .make_span_with(|request: &axum::http::Request<axum::body::Body>| {
-                tracing::info_span!("http_request", method = %request.method(), path = %request.uri().path())
+                tracing::info_span!("http_request", method = %request.method(), route = request.extensions().get::<axum::extract::MatchedPath>().map_or("<unmatched>", |p| p.as_str()))
             })
             .on_response(DefaultOnResponse::new().level(Level::INFO)))
 }

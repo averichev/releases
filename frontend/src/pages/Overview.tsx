@@ -50,23 +50,23 @@ export default function Overview() {
       </div>
       <div className="overview-grid">
         <Card className="intro-card">
-          <Tag color="green" variant="filled"><CheckCircleOutlined /> Каркас платформы</Tag>
-          <Title level={2}>Всё начинается<br />с надёжной основы.</Title>
-          <Paragraph>Сервис запущен. Управление приложениями и публикация обновлений появятся на следующих этапах.</Paragraph>
+          <Tag color="green" variant="filled"><CheckCircleOutlined /> Каталог приложений</Tag>
+          <Title level={2}>Каждому продукту —<br />постоянный адрес.</Title>
+          <Paragraph>Создавайте приложения, управляйте их описаниями, иконками и публичностью. Публикация обновлений появится на следующем этапе.</Paragraph>
           <Link className="intro-link" to="/admin/applications">Перейти к приложениям <ArrowRightOutlined /></Link>
         </Card>
         <HealthCard />
       </div>
       <Alert className="stage-notice" type="info" showIcon icon={<SafetyCertificateOutlined />}
-        title="Административные операции пока недоступны"
-        description="Эта панель — каркас будущего сервиса. Управление данными будет доступно после добавления авторизации." />
-      <div className="section-heading"><Title level={3}>Разделы платформы</Title><Text type="secondary">Следующие этапы</Text></div>
+        title="Доступ к панели защищён"
+        description="Операторы могут просматривать каталог. Администраторы управляют приложениями и доступом команды." />
+      <div className="section-heading"><Title level={3}>Разделы платформы</Title><Text type="secondary">Каталог и распространение</Text></div>
       <div className="section-grid">
         {sections.slice(0, 4).map((section) => (
           <Link key={section.path} to={`/admin/${section.path}`} className="section-link">
             <Card className="section-card"><span className="section-icon">{section.icon}</span>
               <Title level={4}>{section.title}</Title><Paragraph>{section.description}</Paragraph>
-              <span className="section-card-footer">Запланировано <ArrowRightOutlined /></span>
+              <span className="section-card-footer">{section.path === 'applications' ? 'Открыть каталог' : 'Запланировано'} <ArrowRightOutlined /></span>
             </Card>
           </Link>
         ))}

@@ -38,8 +38,19 @@ fn invalid_or_misspelled_settings_fail_early() {
         ("VERUNA__DATABASE__BUSY_TIMEOUT_SECONDS", "0"),
         ("VERUNA__DATABASE__PATH", ""),
         ("VERUNA__STORAGE__DIRECTORY", ""),
+        ("VERUNA__STORAGE__ICONS_DIRECTORY", ""),
         ("VERUNA__LOGGING__FILTER", ""),
         ("VERUNA__DATABASE__PAHT", "typo"),
+        ("VERUNA__AUTH__PUBLIC_ORIGIN", "http://example.com"),
+        ("VERUNA__AUTH__PUBLIC_ORIGIN", "https://example.com/"),
+        ("VERUNA__AUTH__PUBLIC_ORIGIN", "https://example.com/path"),
+        (
+            "VERUNA__AUTH__PUBLIC_ORIGIN",
+            "https://user:pass@example.com",
+        ),
+        ("VERUNA__AUTH__SESSION_TTL_SECONDS", "0"),
+        ("VERUNA__AUTH__SESSION_TTL_SECONDS", "2592001"),
+        ("VERUNA__AUTH__INVITATION_TTL_SECONDS", "604801"),
     ] {
         let environment = HashMap::from([(key.into(), value.into())]);
         assert!(AppConfig::from_sources(None, environment).is_err(), "{key}");
@@ -51,4 +62,25 @@ fn invalid_or_misspelled_settings_fail_early() {
     let path = dir.path().join("broken.toml");
     fs::write(&path, "[server").unwrap();
     assert!(AppConfig::from_sources(Some(&path), HashMap::new()).is_err());
+}
+
+#[test]
+fn validates_https_and_loopback_origins_and_session_configuration() {
+    for origin in [
+        "https://apps.example.com",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://[::1]:8080",
+    ] {
+        let config = AppConfig::from_sources(
+            None,
+            HashMap::from([
+                ("VERUNA__AUTH__PUBLIC_ORIGIN".into(), origin.into()),
+                ("VERUNA__AUTH__SESSION_TTL_SECONDS".into(), "600".into()),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(config.auth.session_ttl_seconds, 600);
+        assert_eq!(config.auth.secure_cookie(), origin.starts_with("https://"));
+    }
 }

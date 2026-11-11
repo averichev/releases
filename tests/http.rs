@@ -16,8 +16,13 @@ async fn setup() -> (TempDir, SqlitePool, Router) {
     let mut config = AppConfig::default();
     config.database.path = directory.path().join("database.sqlite");
     config.storage.directory = directory.path().join("artifacts");
+    config.storage.icons_directory = directory.path().join("icons");
     let pool = initialize(&config).await.unwrap();
-    let router = http::router(pool.clone());
+    let router = http::router(
+        veruna_releases::application_state(pool.clone(), &config)
+            .await
+            .unwrap(),
+    );
     (directory, pool, router)
 }
 
@@ -100,7 +105,7 @@ async fn api_and_asset_errors_never_fall_back_to_html() {
 }
 
 #[tokio::test]
-async fn administration_denies_all_paths_and_methods_until_auth_exists() {
+async fn administration_requires_authentication_for_all_paths_and_methods() {
     let (_directory, pool, router) = setup().await;
     for path in [
         "/api/v1/admin",
@@ -116,9 +121,9 @@ async fn administration_denies_all_paths_and_methods_until_auth_exists() {
             Method::OPTIONS,
         ] {
             let response = request(&router, method, path).await;
-            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
             let json: Value = serde_json::from_slice(&body(response).await).unwrap();
-            assert_eq!(json["error"]["code"], "administration_unavailable");
+            assert_eq!(json["error"]["code"], "unauthorized");
         }
     }
     pool.close().await;

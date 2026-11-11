@@ -10,6 +10,14 @@ busy_timeout_seconds = 5
 
 [storage]
 directory = "data/artifacts"
+icons_directory = "data/icons"
 
 [logging]
 filter = "info,tower_http=info"
+
+# Exact browser origin, without a trailing slash. Use HTTPS in production.
+# With Vite use http://127.0.0.1:5173 instead.
+[auth]
+public_origin = "http://127.0.0.1:8080"
+session_ttl_seconds = 43200
+invitation_ttl_seconds = 86400

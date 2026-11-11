@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App } from 'antd';
 import ruRU from 'antd/locale/ru_RU';
 import { BrowserRouter } from 'react-router-dom';
 import { AppRoutes } from './App';
@@ -17,7 +17,7 @@ createRoot(root).render(
       colorText: '#1e2c29', colorTextSecondary: '#687570',
       fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     } }}>
-      <BrowserRouter><AppRoutes /></BrowserRouter>
+      <App><BrowserRouter><AppRoutes /></BrowserRouter></App>
     </ConfigProvider>
   </StrictMode>,
 );
