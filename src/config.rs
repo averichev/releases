@@ -34,11 +34,15 @@ pub struct DatabaseConfig {
     pub busy_timeout_seconds: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StorageConfig {
     pub directory: PathBuf,
     pub icons_directory: PathBuf,
+    pub temporary_directory: Option<PathBuf>,
+    pub max_file_bytes: u64,
+    pub max_request_bytes: usize,
+    pub upload_idle_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +99,10 @@ impl Default for StorageConfig {
         Self {
             directory: "data/artifacts".into(),
             icons_directory: "data/icons".into(),
+            temporary_directory: None,
+            max_file_bytes: 2 * 1024 * 1024 * 1024,
+            max_request_bytes: 2 * 1024 * 1024 * 1024 + 1024 * 1024,
+            upload_idle_seconds: 120,
         }
     }
 }
@@ -151,6 +159,25 @@ impl AppConfig {
         ensure!(
             !self.storage.icons_directory.as_os_str().is_empty(),
             "storage.icons_directory must not be empty"
+        );
+        ensure!(
+            self.storage.max_file_bytes > 0 && self.storage.max_file_bytes <= i64::MAX as u64,
+            "storage.max_file_bytes must fit a positive SQLite integer"
+        );
+        ensure!(
+            self.storage.max_request_bytes as u64 > self.storage.max_file_bytes,
+            "storage.max_request_bytes must exceed max_file_bytes for multipart overhead"
+        );
+        ensure!(
+            (1..=86400).contains(&self.storage.upload_idle_seconds),
+            "storage.upload_idle_seconds must be between 1 and 86400"
+        );
+        ensure!(
+            self.storage
+                .temporary_directory
+                .as_ref()
+                .is_none_or(|p| !p.as_os_str().is_empty()),
+            "storage.temporary_directory must not be empty"
         );
         ensure!(
             (1..=32).contains(&self.database.max_connections),
@@ -242,5 +269,13 @@ mod tests {
                 .to_string(),
             "VERUNA__STORAGE__DIRECTORY must contain valid UTF-8"
         );
+    }
+}
+
+impl StorageConfig {
+    pub fn temporary_directory(&self) -> PathBuf {
+        self.temporary_directory
+            .clone()
+            .unwrap_or_else(|| self.directory.join(".tmp"))
     }
 }

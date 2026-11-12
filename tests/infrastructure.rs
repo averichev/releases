@@ -40,7 +40,9 @@ async fn creates_configured_paths_and_applies_baseline_once() {
         vec![
             "_sqlx_migrations",
             "applications",
+            "artifacts",
             "login_attempts",
+            "releases",
             "sessions",
             "user_tokens",
             "users"
@@ -54,7 +56,7 @@ async fn creates_configured_paths_and_applies_baseline_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(migrations, 3);
+    assert_eq!(migrations, 4);
     pool.close().await;
 }
 
@@ -119,6 +121,6 @@ async fn catalog_migration_preserves_an_existing_identity_database() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        3
+        4
     );
 }

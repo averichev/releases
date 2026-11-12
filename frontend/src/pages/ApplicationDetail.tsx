@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Alert, App, Button, Card, Descriptions, Empty, Result, Space, Spin, Tabs, Typography } from 'antd';
+import { Alert, App, Button, Card, Descriptions, Result, Space, Spin, Tabs, Typography } from 'antd';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/Auth';
 import { api, ApiError } from '../api/client';
 import { applicationError, applicationPath, date, saveIcon, type Application, type ApplicationValues } from '../api/applications';
+import Releases from './Releases';
 import ApplicationForm, { ApplicationIcon, ApplicationTags, IconPicker } from './ApplicationForm';
 
 function Settings({ application, onChange, iconError }: { application: Application; onChange: (app: Application) => void; iconError?: string }) {
@@ -72,7 +73,7 @@ export default function ApplicationDetail() {
         { key: 'created', label: 'Создано', children: date(application.created_at) }, { key: 'updated', label: 'Изменено', children: date(application.updated_at) },
       ]} />
     </Card>}
-    {tab === 'releases' && <Card><Empty description="Релизы пока не опубликованы" /></Card>}
+    {tab === 'releases' && <Releases application={application} administrator={administrator} />}
     {tab === 'settings' && (administrator ? <Settings key={application.id} application={application} onChange={setApplication} iconError={typeof location.state?.iconError === 'string' ? location.state.iconError as string : undefined} /> : <Result status="403" title="Доступ ограничен" subTitle="Изменять настройки приложения может администратор." />)}
   </>;
 }

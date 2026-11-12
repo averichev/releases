@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check the standalone binary and real cookie/API flow using only the stdlib."""
+import hashlib
 import http.cookiejar
 import json
 import os
@@ -62,11 +63,11 @@ def main():
             jar = http.cookiejar.CookieJar()
             browser = build_opener(HTTPCookieProcessor(jar))
 
-            def call(path, method="GET", payload=None, csrf=None, expected=200, opener=browser):
+            def call(path, method="GET", payload=None, csrf=None, expected=200, opener=browser, content_type="application/json"):
                 headers = {"Accept": "application/json"}
                 data = None
                 if method != "GET":
-                    headers.update({"Origin": base, "X-Veruna-Request": "1", "Content-Type": "application/json"})
+                    headers.update({"Origin": base, "X-Veruna-Request": "1", "Content-Type": content_type})
                     data = payload if isinstance(payload, bytes) else json.dumps(payload if payload is not None else {}).encode()
                     if csrf:
                         headers["X-CSRF-Token"] = csrf
@@ -129,6 +130,29 @@ def main():
             call(application_path + "/restore", "POST", csrf=csrf)
             nested, nested_headers = call(f'/admin/applications/{application["id"]}/settings')
             assert nested_headers["Content-Type"].startswith("text/html") and nested == html
+            release, _ = call(application_path + "/releases", "POST", {"version": " v1.2.0 ", "release_notes": "Smoke changes"}, csrf, 201)
+            assert release["version"] == "1.2.0" and release["status"] == "draft" and release["published_at"] is None
+            release_path = application_path + "/releases/" + release["id"]
+            call(application_path + "/releases", "POST", {"version": "1.2.0+build.2"}, csrf, 409)
+            uploaded = []
+            for target, filename, contents in [("windows-x86_64", "installer.exe", b"windows installer"), ("linux-x86_64", "installer.tar.gz", b"linux installer")]:
+                multipart = (f'--SMOKE\r\nContent-Disposition: form-data; name="target"\r\n\r\n{target}\r\n'
+                             f'--SMOKE\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n\r\n').encode() + contents + b"\r\n--SMOKE--\r\n"
+                artifact, _ = call(release_path + "/artifacts", "POST", multipart, csrf, 201, content_type="multipart/form-data; boundary=SMOKE")
+                assert artifact["size_bytes"] == len(contents) and artifact["sha256"] == hashlib.sha256(contents).hexdigest()
+                assert "storage_key" not in artifact
+                download = release_path + "/artifacts/" + artifact["id"] + "/download"
+                data, headers = call(download)
+                assert data == contents and headers["Content-Type"] == "application/octet-stream"
+                assert headers["Content-Disposition"].startswith("attachment;")
+                call(download, opener=build_opener(), expected=401)
+                verified, _ = call(release_path + "/artifacts/" + artifact["id"] + "/verify", "POST", csrf=csrf)
+                assert verified["valid"] is True
+                uploaded.append(artifact)
+            release, _ = call(release_path)
+            assert release["artifact_count"] == 2
+            nested, nested_headers = call(f'/admin/applications/{application["id"]}/releases/{release["id"]}')
+            assert nested == html and nested_headers["Content-Type"].startswith("text/html")
             invitation, _ = call("/api/v1/admin/users/invitations", "POST", {"username": "operator", "role": "operator"}, csrf, 201)
             token = invitation["activation_url"].split("#token=")[1]
             secret_values.append(token)
@@ -141,6 +165,9 @@ def main():
             catalog, _ = call("/api/v1/admin/applications")
             assert catalog["total"] == 1
             call(application["icon_url"])
+            call(release_path)
+            call(release_path + "/artifacts/" + uploaded[0]["id"] + "/download")
+            call(release_path, "DELETE", csrf=operator["csrf_token"], expected=403)
             call(application_path, "PATCH", {"name": "Forbidden"}, operator["csrf_token"], 403)
             call(application_path + "/archive", "POST", csrf=operator["csrf_token"], expected=403)
             call("/api/v1/auth/logout", "POST", csrf=operator["csrf_token"], expected=204)
@@ -155,11 +182,14 @@ def main():
             secret_values.append(new_password)
             call("/api/v1/auth/activate", "POST", {"token": recovery_token, "password": new_password}, expected=204)
             recovered, _ = call("/api/v1/auth/login", "POST", {"username": "owner", "password": new_password})
+            call(release_path + "/artifacts/" + uploaded[0]["id"], "DELETE", csrf=recovered["csrf_token"], expected=204)
+            call(release_path, "DELETE", csrf=recovered["csrf_token"], expected=204)
+            call(release_path, expected=404)
             call("/api/v1/auth/logout", "POST", csrf=recovered["csrf_token"], expected=204)
             assert (root / "storage/artifacts").is_dir()
             with sqlite3.connect(root / "state/db/releases.sqlite") as database:
                 assert database.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-                assert database.execute("SELECT count(*) FROM _sqlx_migrations WHERE success = 1").fetchone()[0] == 3
+                assert database.execute("SELECT count(*) FROM _sqlx_migrations WHERE success = 1").fetchone()[0] == 4
                 assert database.execute("SELECT count(*) FROM user_tokens").fetchone()[0] == 0
                 assert database.execute("SELECT slug FROM applications").fetchone()[0] == "catalog-smoke"
             assert len(list((root / "storage/icons").glob("*.png"))) == 1
@@ -168,7 +198,7 @@ def main():
             logs = log_path.read_text()
             assert "Veruna Releases stopped" in logs
             assert all(value not in logs for value in secret_values), "Secret leaked into logs"
-            print("Smoke passed: standalone assets, CLI bootstrap/recovery, sessions/CSRF, catalog lifecycle/search, icons, nested routes, role boundaries, safe logs, WAL, migrations, SIGTERM.")
+            print("Smoke passed: standalone assets, CLI bootstrap/recovery, sessions/CSRF, catalog lifecycle/search, icons, draft releases, multipart uploads/SHA-256/downloads/deletion, nested routes, role boundaries, safe logs, WAL, migrations, SIGTERM.")
         finally:
             if process.poll() is None:
                 process.kill()

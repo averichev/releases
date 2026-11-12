@@ -17,6 +17,7 @@ const Profile = lazy(() => import('./pages/Profile'));
 const Overview = lazy(() => import('./pages/Overview'));
 const Applications = lazy(() => import('./pages/Applications'));
 const ApplicationCreate = lazy(() => import('./pages/ApplicationCreate'));
+const ReleaseDetail = lazy(() => import('./pages/ReleaseDetail'));
 const ApplicationDetail = lazy(() => import('./pages/ApplicationDetail'));
 
 function AdminLayout() {
@@ -41,7 +42,7 @@ function AdminLayout() {
             { key: 'profile', icon: <UserOutlined />, label: <Link to="/admin/profile">Профиль</Link> },
           ]} />
         </nav>
-        <div className="sidebar-note"><span className="status-dot" />Защищённый доступ<span>Этап 03</span></div>
+        <div className="sidebar-note"><span className="status-dot" />Защищённый доступ<span>Этап 04</span></div>
       </Layout.Sider>
       <Layout className="main-layout">
         <Layout.Header className="topbar">
@@ -56,11 +57,12 @@ function AdminLayout() {
 }
 
 function Placeholder({ title, description }: { title: string; description: string }) {
+  const withinApplication = title === 'Релизы' || title === 'Дистрибутивы';
   return <>
     <div className="page-heading"><div className="eyebrow">ПАНЕЛЬ УПРАВЛЕНИЯ</div><Title level={1}>{title}</Title><Paragraph>{description}</Paragraph></div>
-    <Card><Result icon={<SafetyCertificateOutlined />} title="Раздел запланирован"
-      subTitle="Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."
-      extra={<Link to="/admin"><Button>Вернуться к обзору</Button></Link>} /></Card>
+    <Card><Result icon={<SafetyCertificateOutlined />} title={withinApplication ? "Выберите приложение" : "Раздел запланирован"}
+      subTitle={withinApplication ? "Откройте приложение → Релизы. В каждом черновике можно управлять установщиками." : "Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."}
+      extra={<Link to={withinApplication ? "/admin/applications" : "/admin"}><Button>{withinApplication ? "Открыть приложения" : "Вернуться к обзору"}</Button></Link>} /></Card>
   </>;
 }
 
@@ -76,6 +78,7 @@ export function AppRoutes() {
       <Route path="profile" element={<Suspense fallback={<Spin />}><Profile /></Suspense>} />
       <Route path="applications" element={<Suspense fallback={<Spin />}><Applications /></Suspense>} />
       <Route path="applications/new" element={<Suspense fallback={<Spin />}><ApplicationCreate /></Suspense>} />
+      <Route path="applications/:id/releases/:releaseId" element={<Suspense fallback={<Spin />}><ReleaseDetail /></Suspense>} />
       {['applications/:id', 'applications/:id/settings', 'applications/:id/releases'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
       {sections.filter((s) => s.path !== 'users' && s.path !== 'applications').map((section) => <Route key={section.path} path={section.path} element={<Placeholder title={section.title} description={section.description} />} />)}
       <Route path="*" element={<Result status="404" title="Страница не найдена" extra={<Link to="/admin">Вернуться к обзору</Link>} />} />

@@ -11,6 +11,11 @@ busy_timeout_seconds = 5
 [storage]
 directory = "data/artifacts"
 icons_directory = "data/icons"
+# Must share the artifact filesystem; default follows storage.directory.
+# temporary_directory = "data/artifacts/.tmp"
+max_file_bytes = 2147483648
+max_request_bytes = 2148532224
+upload_idle_seconds = 120
 
 [logging]
 filter = "info,tower_http=info"

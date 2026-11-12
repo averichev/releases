@@ -1,9 +1,12 @@
 mod admin;
 mod applications;
+mod artifacts;
 mod assets;
 mod auth;
 mod error;
 mod health;
+mod releases;
+mod upload_body;
 
 use axum::{
     Router,
@@ -12,7 +15,10 @@ use axum::{
 };
 use sqlx::SqlitePool;
 use tower_http::{
-    compression::CompressionLayer,
+    compression::{
+        CompressionLayer,
+        predicate::{DefaultPredicate, NotForContentType, Predicate},
+    },
     set_header::SetResponseHeaderLayer,
     trace::{DefaultOnResponse, TraceLayer},
 };
@@ -22,6 +28,9 @@ use error::ApiError;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub storage_config: crate::config::StorageConfig,
+    pub releases: crate::services::release::ReleaseManagement,
+    pub artifacts: crate::services::artifact::ArtifactManagement,
     pub database: SqlitePool,
     pub auth_config: crate::config::AuthConfig,
     pub authentication: crate::services::auth::Authentication,
@@ -53,7 +62,7 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
         .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")))
-        .layer(CompressionLayer::new())
+        .layer(CompressionLayer::new().compress_when(DefaultPredicate::new().and(NotForContentType::const_new("application/octet-stream"))))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(TraceLayer::new_for_http()

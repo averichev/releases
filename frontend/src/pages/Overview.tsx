@@ -52,21 +52,21 @@ export default function Overview() {
         <Card className="intro-card">
           <Tag color="green" variant="filled"><CheckCircleOutlined /> Каталог приложений</Tag>
           <Title level={2}>Каждому продукту —<br />постоянный адрес.</Title>
-          <Paragraph>Создавайте приложения, управляйте их описаниями, иконками и публичностью. Публикация обновлений появится на следующем этапе.</Paragraph>
+          <Paragraph>Создавайте черновики релизов, загружайте установщики и проверяйте SHA-256. Управление релизами доступно в карточке каждого приложения.</Paragraph>
           <Link className="intro-link" to="/admin/applications">Перейти к приложениям <ArrowRightOutlined /></Link>
         </Card>
         <HealthCard />
       </div>
       <Alert className="stage-notice" type="info" showIcon icon={<SafetyCertificateOutlined />}
         title="Доступ к панели защищён"
-        description="Операторы могут просматривать каталог. Администраторы управляют приложениями и доступом команды." />
+        description="Операторы просматривают каталог, релизы и скачивают файлы. Администраторы управляют черновиками, установщиками и доступом команды." />
       <div className="section-heading"><Title level={3}>Разделы платформы</Title><Text type="secondary">Каталог и распространение</Text></div>
       <div className="section-grid">
         {sections.slice(0, 4).map((section) => (
           <Link key={section.path} to={`/admin/${section.path}`} className="section-link">
             <Card className="section-card"><span className="section-icon">{section.icon}</span>
               <Title level={4}>{section.title}</Title><Paragraph>{section.description}</Paragraph>
-              <span className="section-card-footer">{section.path === 'applications' ? 'Открыть каталог' : 'Запланировано'} <ArrowRightOutlined /></span>
+              <span className="section-card-footer">{section.path === 'applications' ? 'Открыть каталог' : ['releases', 'artifacts'].includes(section.path) ? 'Выбрать приложение' : 'Запланировано'} <ArrowRightOutlined /></span>
             </Card>
           </Link>
         ))}

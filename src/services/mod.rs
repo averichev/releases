@@ -6,3 +6,6 @@ pub mod auth;
 pub mod error;
 pub mod sessions;
 pub mod users;
+
+pub mod artifact;
+pub mod release;

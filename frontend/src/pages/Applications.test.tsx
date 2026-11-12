@@ -36,9 +36,9 @@ it('keeps a manually chosen slug while the name changes and rejects reserved slu
   expect(await screen.findByText('Недопустимый или служебный slug. Дефис не может стоять в начале или конце.')).toBeDefined();
   expect(fetch).toHaveBeenCalledTimes(1);
 });
-it('restores a nested application route and offers an empty releases view', async () => {
-  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : app)))); renderAt(`/admin/applications/${app.id}/releases`);
-  expect(await screen.findByRole('heading', { name: app.name })).toBeDefined(); expect(screen.getByText('Релизы пока не опубликованы')).toBeDefined(); expect(screen.queryByText('1.0.0')).toBeNull();
+it('restores a nested application route and loads real releases', async () => {
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : url.includes('/releases?') ? { items: [], total: 0, page: 1, per_page: 20 } : app)))); renderAt(`/admin/applications/${app.id}/releases`);
+  expect(await screen.findByRole('heading', { name: app.name })).toBeDefined(); expect(await screen.findByText('Релизов пока нет')).toBeDefined(); expect(screen.queryByText('1.0.0')).toBeNull();
 });
 it('edits settings without submitting slug, then archives and restores', async () => {
   let stored = { ...app };

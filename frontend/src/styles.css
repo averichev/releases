@@ -141,3 +141,23 @@ a { color: #236b54; }
 @media (max-width: 700px) {
   .breadcrumb-parent, .breadcrumb-divider { display: none; }
 }
+
+.release-toolbar { margin-bottom: 20px; width: 100%; }
+.release-toolbar .ant-input-search { width: min(300px, 100%); }
+.release-toolbar .ant-select { min-width: 175px; }
+.release-heading .page-heading { min-width: 0; overflow-wrap: anywhere; }
+.release-heading .ant-tag { flex-shrink: 0; }
+.release-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.release-artifacts, .release-delete { margin-top: 24px; }
+.artifact-hash { display: inline-block; max-width: 220px; overflow-wrap: anywhere; font-size: 12px; }
+.artifact-filename { display: inline-block; max-width: 260px; overflow-wrap: anywhere; }
+.upload-file-summary, .upload-progress { margin-top: 16px; }
+.upload-file-summary { overflow-wrap: anywhere; }
+.upload-progress { margin-bottom: 16px; }
+@media (max-width: 600px) {
+  .release-info .ant-card-head, .release-artifacts .ant-card-head { align-items: flex-start; padding-top: 16px; padding-bottom: 16px; }
+  .release-info .ant-card-head-wrapper, .release-artifacts .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; }
+  .release-info .ant-card-head-title { white-space: normal; }
+  .release-info .ant-card-extra, .release-artifacts .ant-card-extra { margin-inline-start: 0; }
+  .release-toolbar > .ant-space-item, .release-toolbar .ant-input-search, .release-toolbar .ant-select { width: 100%; }
+}

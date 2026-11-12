@@ -4,3 +4,6 @@ pub mod health;
 pub mod applications;
 pub mod sessions;
 pub mod users;
+
+pub mod artifact;
+pub mod release;

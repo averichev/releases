@@ -39,6 +39,12 @@ fn invalid_or_misspelled_settings_fail_early() {
         ("VERUNA__DATABASE__PATH", ""),
         ("VERUNA__STORAGE__DIRECTORY", ""),
         ("VERUNA__STORAGE__ICONS_DIRECTORY", ""),
+        ("VERUNA__STORAGE__TEMPORARY_DIRECTORY", ""),
+        ("VERUNA__STORAGE__MAX_FILE_BYTES", "0"),
+        ("VERUNA__STORAGE__MAX_FILE_BYTES", "9223372036854775808"),
+        ("VERUNA__STORAGE__MAX_REQUEST_BYTES", "100"),
+        ("VERUNA__STORAGE__UPLOAD_IDLE_SECONDS", "0"),
+        ("VERUNA__STORAGE__UPLOAD_IDLE_SECONDS", "86401"),
         ("VERUNA__LOGGING__FILTER", ""),
         ("VERUNA__DATABASE__PAHT", "typo"),
         ("VERUNA__AUTH__PUBLIC_ORIGIN", "http://example.com"),
@@ -83,4 +89,26 @@ fn validates_https_and_loopback_origins_and_session_configuration() {
         assert_eq!(config.auth.session_ttl_seconds, 600);
         assert_eq!(config.auth.secure_cookie(), origin.starts_with("https://"));
     }
+}
+
+#[test]
+fn artifact_defaults_and_overrides_keep_temporary_data_with_storage() {
+    let config = AppConfig::from_sources(
+        None,
+        HashMap::from([
+            ("VERUNA__STORAGE__DIRECTORY".into(), "/disk/releases".into()),
+            ("VERUNA__STORAGE__MAX_FILE_BYTES".into(), "4096".into()),
+            ("VERUNA__STORAGE__MAX_REQUEST_BYTES".into(), "8192".into()),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(
+        config.storage.temporary_directory(),
+        std::path::Path::new("/disk/releases/.tmp")
+    );
+    assert_eq!(config.storage.max_file_bytes, 4096);
+    assert_eq!(
+        AppConfig::default().storage.max_file_bytes,
+        2 * 1024 * 1024 * 1024
+    );
 }

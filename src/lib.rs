@@ -18,7 +18,7 @@ use crate::{
 /// Initialize durable infrastructure before accepting requests.
 pub async fn initialize(config: &AppConfig) -> Result<SqlitePool> {
     config.validate()?;
-    let storage = LocalArtifactStorage::new(config.storage.directory.clone());
+    let storage = LocalArtifactStorage::new(&config.storage);
     storage.initialize().await?;
     let database = infrastructure::database::connect(&config.database).await?;
     let icons = infrastructure::icons::IconStorage::new(config.storage.icons_directory.clone());
@@ -26,6 +26,10 @@ pub async fn initialize(config: &AppConfig) -> Result<SqlitePool> {
         let keys = repositories::applications::ApplicationsRepository::new(database.clone())
             .icon_keys()
             .await?;
+        let references = repositories::artifact::ArtifactsRepository::new(database.clone())
+            .references()
+            .await?;
+        storage.reconcile(references).await?;
         icons
             .initialize(config.storage.directory.clone(), keys)
             .await
@@ -46,7 +50,16 @@ pub async fn application_state(
     let passwords = infrastructure::passwords::Passwords::new().await?;
     let users = repositories::users::UsersRepository::new(database.clone());
     let sessions = repositories::sessions::SessionsRepository::new(database.clone());
+    let storage = LocalArtifactStorage::new(&config.storage);
+    let releases = repositories::release::ReleasesRepository::new(database.clone());
     Ok(http::AppState {
+        storage_config: config.storage.clone(),
+        releases: services::release::ReleaseManagement::new(releases.clone(), storage.clone()),
+        artifacts: services::artifact::ArtifactManagement::new(
+            repositories::artifact::ArtifactsRepository::new(database.clone()),
+            releases,
+            storage,
+        ),
         database: database.clone(),
         auth_config: config.auth.clone(),
         authentication: services::auth::Authentication::new(

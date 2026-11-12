@@ -21,6 +21,16 @@ pub enum ApiError {
     InvalidApplication,
     SlugConflict,
     InvalidIcon,
+    InvalidRelease,
+    ReleaseVersionConflict,
+    ReleaseLocked,
+    InvalidArtifact,
+    ArtifactConflict,
+    PayloadTooLarge,
+    UploadTimeout,
+    StorageFull,
+    StorageUnavailable,
+    StorageBusy,
 }
 
 #[derive(Serialize)]
@@ -37,6 +47,56 @@ struct ErrorBody {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::InvalidRelease => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_release",
+                "Invalid SemVer, release fields or query",
+            ),
+            Self::ReleaseVersionConflict => (
+                StatusCode::CONFLICT,
+                "release_version_exists",
+                "Release with the same version precedence already exists",
+            ),
+            Self::ReleaseLocked => (
+                StatusCode::CONFLICT,
+                "release_locked",
+                "Release must be a draft; new releases require an active application",
+            ),
+            Self::InvalidArtifact => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_artifact",
+                "Invalid filename, target, format or multipart fields",
+            ),
+            Self::ArtifactConflict => (
+                StatusCode::CONFLICT,
+                "artifact_exists",
+                "Artifact target and format already exist in this release",
+            ),
+            Self::PayloadTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "Upload exceeds configured size limit",
+            ),
+            Self::UploadTimeout => (
+                StatusCode::REQUEST_TIMEOUT,
+                "upload_timeout",
+                "Upload idle timeout exceeded",
+            ),
+            Self::StorageFull => (
+                StatusCode::INSUFFICIENT_STORAGE,
+                "storage_full",
+                "Insufficient storage space",
+            ),
+            Self::StorageUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_unavailable",
+                "Artifact storage needs repair",
+            ),
+            Self::StorageBusy => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_busy",
+                "Storage is busy; retry later",
+            ),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found", "Resource not found"),
             Self::MethodNotAllowed => (
                 StatusCode::METHOD_NOT_ALLOWED,

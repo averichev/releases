@@ -288,6 +288,16 @@ impl From<ServiceError> for ApiError {
             ServiceError::InvalidApplication => Self::InvalidApplication,
             ServiceError::ApplicationSlugConflict => Self::SlugConflict,
             ServiceError::InvalidIcon => Self::InvalidIcon,
+            ServiceError::InvalidRelease => Self::InvalidRelease,
+            ServiceError::ReleaseVersionConflict => Self::ReleaseVersionConflict,
+            ServiceError::ReleaseLocked => Self::ReleaseLocked,
+            ServiceError::InvalidArtifact => Self::InvalidArtifact,
+            ServiceError::ArtifactConflict => Self::ArtifactConflict,
+            ServiceError::PayloadTooLarge => Self::PayloadTooLarge,
+            ServiceError::UploadTimeout => Self::UploadTimeout,
+            ServiceError::StorageFull => Self::StorageFull,
+            ServiceError::StorageUnavailable => Self::StorageUnavailable,
+            ServiceError::StorageBusy => Self::StorageBusy,
             ServiceError::Internal(cause) => {
                 tracing::error!(error = ?cause, "Service operation failed");
                 Self::Internal
