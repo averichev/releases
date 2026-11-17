@@ -60,18 +60,21 @@ trap 'rm -rf "$staging"' EXIT
 trap 'exit 1' HUP INT TERM
 
 prefix=veruna-releases-$version
-cp target/aarch64-apple-darwin/release/veruna-releases "$staging/$prefix-macos-aarch64"
+# Finder treats the dots in SemVer as an unknown extension without .tool.
+# Terminal registers .tool and executes this same Mach-O binary directly.
+cp target/aarch64-apple-darwin/release/veruna-releases "$staging/$prefix-macos-aarch64.tool"
 cp target/x86_64-unknown-linux-musl/release/veruna-releases "$staging/$prefix-linux-x86_64"
 cp target/x86_64-pc-windows-gnu/release/veruna-releases.exe "$staging/$prefix-windows-x86_64.exe"
 (
   cd "$staging"
-  shasum -a 256 "$prefix-macos-aarch64" "$prefix-linux-x86_64" "$prefix-windows-x86_64.exe" > SHA256SUMS
+  shasum -a 256 "$prefix-macos-aarch64.tool" "$prefix-linux-x86_64" "$prefix-windows-x86_64.exe" > SHA256SUMS
 )
 
 output=$PWD/dist/releases/$version
 mkdir -p "$output"
 mv "$staging/"* "$output/"
-# Remove only legacy archives generated for this same version.
+# Remove only legacy artifacts generated for this same version.
 rm -f "$output/$prefix-macos-aarch64.tar.gz" \
-  "$output/$prefix-linux-x86_64.tar.gz" "$output/$prefix-windows-x86_64.zip"
+  "$output/$prefix-linux-x86_64.tar.gz" "$output/$prefix-windows-x86_64.zip" \
+  "$output/$prefix-macos-aarch64"
 printf '\nРелиз %s собран: %s\n' "$version" "$output"

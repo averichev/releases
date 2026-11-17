@@ -118,7 +118,7 @@ make release
 | --- | --- | --- |
 | Linux x86_64 | `x86_64-unknown-linux-musl` | `veruna-releases-<version>-linux-x86_64` |
 | Windows x86_64 | `x86_64-pc-windows-gnu` | `veruna-releases-<version>-windows-x86_64.exe` |
-| macOS Apple Silicon | `aarch64-apple-darwin` | `veruna-releases-<version>-macos-aarch64` |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `veruna-releases-<version>-macos-aarch64.tool` |
 
 Однократная подготовка, помимо Node.js/npm и Rust через rustup:
 
@@ -133,19 +133,19 @@ rustup target add --toolchain stable aarch64-apple-darwin x86_64-unknown-linux-m
 
 Для линковки Zig скрипт поднимает мягкий лимит открытых файлов до 8192, если текущий ниже, сохраняя жёсткий лимит и настройки родительского терминала. Это предотвращает `ProcessFdQuotaExceeded` при сборке Linux musl со стандартным лимитом macOS в 256 файлов. Если жёсткий лимит не позволяет повышение, скрипт завершится до сборки с диагностикой.
 
-Результат: `dist/releases/<version>/veruna-releases-<version>-<platform>` (с `.exe` для Windows) и `SHA256SUMS`; версия берётся из `Cargo.toml`. Бинарники можно переносить и запускать отдельно. Например, для `0.1.0`:
+Результат: `dist/releases/<version>/veruna-releases-<version>-<platform>` (с `.exe` для Windows и `.tool` для macOS) и `SHA256SUMS`; версия берётся из `Cargo.toml`. Бинарники можно переносить и запускать отдельно. Например, для `0.1.0`:
 
 ```text
 dist/releases/0.1.0/
   veruna-releases-0.1.0-linux-x86_64
   veruna-releases-0.1.0-windows-x86_64.exe
-  veruna-releases-0.1.0-macos-aarch64
+  veruna-releases-0.1.0-macos-aarch64.tool
   SHA256SUMS
 ```
 
-Проверка файлов: `cd dist/releases/0.1.0 && shasum -a 256 -c SHA256SUMS`. Повторная сборка убирает старые архивы этих трёх платформ для той же версии после успешной замены бинарников. Каталоги `dist/` и `target/` исключены из Git. Сборка не публикует файлы и не подписывает бинарники. Проверка запуска выполняется отдельно; локальный smoke на Apple Silicon: `python3 scripts/smoke.py dist/releases/0.1.0/veruna-releases-0.1.0-macos-aarch64`.
+Проверка файлов: `cd dist/releases/0.1.0 && shasum -a 256 -c SHA256SUMS`. Повторная сборка убирает старые архивы этих трёх платформ и старое имя macOS без `.tool` для той же версии после успешной замены бинарников. Каталоги `dist/` и `target/` исключены из Git. Сборка не публикует файлы и не подписывает бинарники. Проверка запуска выполняется отдельно; локальный smoke на Apple Silicon: `python3 scripts/smoke.py dist/releases/0.1.0/veruna-releases-0.1.0-macos-aarch64.tool`.
 
-Для запуска по клику выберите файл своей ОС и архитектуры: `.exe` в Windows, `macos-aarch64` на Mac с Apple Silicon, `linux-x86_64` на Linux x86_64. После успешного старта откроется браузер. Unix-бинарники сохраняют право исполнения при сборке; если способ передачи снял его, выполните `chmod +x <файл>`. На Linux запуск по клику также зависит от настроек файлового менеджера; нужен рабочий стол с `xdg-open`. Бинарники не подписаны: системные правила запуска загруженных приложений продолжают действовать. Файл Linux нельзя запускать на macOS — это вызывает `exec format error`.
+Для запуска по клику выберите файл своей ОС и архитектуры: `.exe` в Windows, `macos-aarch64.tool` на Mac с Apple Silicon, `linux-x86_64` на Linux x86_64. На macOS `.tool` открывается через Terminal, который запускает бинарник; это тот же Mach-O файл, без скрипта-обёртки. Суффикс нужен Finder, чтобы точки в версии не воспринимались как неизвестное расширение документа. После успешного старта откроется браузер. Unix-бинарники сохраняют право исполнения при сборке; если способ передачи снял его, выполните `chmod +x <файл>`. На Linux запуск по клику также зависит от настроек файлового менеджера; нужен рабочий стол с `xdg-open`. Бинарники не подписаны: системные правила запуска загруженных приложений продолжают действовать. Файл Linux нельзя запускать на macOS — это вызывает `exec format error`.
 
 ### Сборка для текущей системы
 
