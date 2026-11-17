@@ -100,6 +100,45 @@ VERUNA_CONFIG=/etc/veruna/releases.toml ./target/release/veruna-releases
 
 ## Production
 
+### Релиз для Linux, Windows и macOS
+
+На macOS с Xcode Command Line Tools команда собирает UI один раз, затем три release-бинарника со встроенными assets и миграциями:
+
+```sh
+make release
+```
+
+| Платформа | Rust target | Архив |
+| --- | --- | --- |
+| Linux x86_64 | `x86_64-unknown-linux-musl` | `.tar.gz` |
+| Windows x86_64 | `x86_64-pc-windows-gnu` | `.zip` |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `.tar.gz` |
+
+Однократная подготовка, помимо Node.js/npm и Rust через rustup:
+
+```sh
+xcode-select --install # если Command Line Tools ещё не установлены
+brew install zig mingw-w64
+cargo install --locked cargo-zigbuild
+rustup target add --toolchain stable aarch64-apple-darwin x86_64-unknown-linux-musl x86_64-pc-windows-gnu
+```
+
+Сборка явно использует rustup toolchain `stable`, чтобы Cargo, rustc и установленные target-библиотеки не смешивались с Rust из Homebrew. Для другой установленной версии: `RELEASE_TOOLCHAIN=1.91.1 make release`; targets должны быть установлены в выбранном toolchain. Скрипт проверяет зависимости до сборки и не устанавливает их автоматически. Linux собирается через [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild), Windows — через MinGW, macOS — системным Apple toolchain.
+
+Результат: `dist/releases/<version>/veruna-releases-<version>-<platform>.<archive>` и `SHA256SUMS`; версия берётся из `Cargo.toml`. Архивы содержат только соответствующий бинарник. Например, для `0.1.0`:
+
+```text
+dist/releases/0.1.0/
+  veruna-releases-0.1.0-linux-x86_64.tar.gz
+  veruna-releases-0.1.0-windows-x86_64.zip
+  veruna-releases-0.1.0-macos-aarch64.tar.gz
+  SHA256SUMS
+```
+
+Проверка архивов: `cd dist/releases/0.1.0 && shasum -a 256 -c SHA256SUMS`. Каталоги `dist/` и `target/` исключены из Git. Сборка не публикует файлы и не подписывает бинарники. Проверка запуска выполняется отдельно; локальный smoke на Apple Silicon: `python3 scripts/smoke.py target/aarch64-apple-darwin/release/veruna-releases`.
+
+### Сборка для текущей системы
+
 ```sh
 sh scripts/build.sh
 python3 scripts/smoke.py

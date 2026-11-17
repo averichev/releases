@@ -105,6 +105,8 @@ SIGINT/SIGTERM инициируют graceful shutdown: закрыть приём
 
 `npm ci → TypeScript → Vite → cargo build`. Эта последовательность явная в скриптах и CI. `build.rs` не запускает subprocess/npm; он требует `frontend/dist/index.html` и следит за изменением `dist` и `migrations`.
 
+`make release` вызывает `scripts/release.sh` на macOS: один раз собирает UI, затем release-бинарники Linux x86_64 (musl через cargo-zigbuild/Zig), Windows x86_64 (GNU через MinGW) и macOS ARM64 (Apple toolchain). Все Cargo-команды используют один явно выбранный rustup toolchain (`stable` по умолчанию, `RELEASE_TOOLCHAIN` для переопределения) и `--locked`. После успешной сборки всех targets скрипт создаёт три архива с бинарниками и SHA-256 в `dist/releases/<Cargo version>/`. Это локальная упаковка существующего единственного binary; публикация, подпись, CI и данные приложения в неё не входят. Сборка для текущей ОС через `scripts/build.sh` сохраняется.
+
 `rust-embed` с `debug-embed` хранит assets в бинарнике во всех профилях. JS/CSS имеют имена с хешем и `Cache-Control: public, max-age=31536000, immutable`; HTML и favicon требуют перепроверки (`no-cache`). У ответов включён `nosniff`, поддерживается gzip по согласованию с клиентом. Прямое открытие вложенных `/admin/...` получает index.html; неизвестный frontend-маршрут показывает React 404. Пути с точкой вне реальных assets не используют SPA fallback. Новые загрузки и манифесты необходимо регистрировать явными серверными маршрутами.
 
 Разработка интерфейса использует Vite HMR с прокси `/api`; production использует только Rust. CORS не включается: интерфейс и API имеют один origin. Префикс установки не поддерживается. Внешние runtime CDN/fonts отсутствуют.
