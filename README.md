@@ -7,7 +7,7 @@
 ## Требования
 
 - Rust 1.91+ с Cargo, rustfmt и Clippy; системный C toolchain для сборки SQLite.
-- Node.js 20.19+ или 22.12+ и npm; для нового окружения используйте поддерживаемую LTS-ветку Node.js, совместимую с `frontend/package.json`.
+- Node.js 20.x (от 20.19), 22.x (от 22.12) или 24+ и npm; для нового окружения используйте поддерживаемую LTS-ветку Node.js, совместимую с `frontend/package.json`.
 - Python 3 — только для smoke-теста, без сторонних библиотек.
 
 Версии зависимостей фиксируются `Cargo.lock` и `frontend/package-lock.json`. SQLx 0.8.6 выбран для совместимости с Rust 1.91; переход на 0.9 требует отдельного обновления Rust. SQLite собирается вместе с SQLx: системный сервер БД и SQLx CLI не нужны.
@@ -124,6 +124,8 @@ rustup target add --toolchain stable aarch64-apple-darwin x86_64-unknown-linux-m
 ```
 
 Сборка явно использует rustup toolchain `stable`, чтобы Cargo, rustc и установленные target-библиотеки не смешивались с Rust из Homebrew. Для другой установленной версии: `RELEASE_TOOLCHAIN=1.91.1 make release`; targets должны быть установлены в выбранном toolchain. Скрипт проверяет зависимости до сборки и не устанавливает их автоматически. Linux собирается через [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild), Windows — через MinGW, macOS — системным Apple toolchain.
+
+Для линковки Zig скрипт поднимает мягкий лимит открытых файлов до 8192, если текущий ниже, сохраняя жёсткий лимит и настройки родительского терминала. Это предотвращает `ProcessFdQuotaExceeded` при сборке Linux musl со стандартным лимитом macOS в 256 файлов. Если жёсткий лимит не позволяет повышение, скрипт завершится до сборки с диагностикой.
 
 Результат: `dist/releases/<version>/veruna-releases-<version>-<platform>.<archive>` и `SHA256SUMS`; версия берётся из `Cargo.toml`. Архивы содержат только соответствующий бинарник. Например, для `0.1.0`:
 

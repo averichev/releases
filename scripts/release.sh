@@ -9,6 +9,15 @@ fail() {
 
 [ "$(uname -s)" = Darwin ] || fail "Сборка трёх платформ требует macOS с Xcode Command Line Tools."
 
+# Zig opens many object files concurrently when linking static musl binaries.
+# Raise only this process's soft limit; preserve higher and unlimited limits.
+minimum_open_files=8192
+open_files=$(ulimit -S -n)
+if [ "$open_files" != unlimited ] && [ "$open_files" -lt "$minimum_open_files" ]; then
+  ulimit -S -n "$minimum_open_files" 2>/dev/null ||
+    fail "Для линковки Zig нужен лимит открытых файлов не ниже $minimum_open_files (soft=$open_files, hard=$(ulimit -H -n)). Увеличьте hard limit в окружении запуска и повторите make release."
+fi
+
 for tool in npm rustup zig cargo-zigbuild xcrun x86_64-w64-mingw32-gcc x86_64-w64-mingw32-ar tar zip shasum; do
   command -v "$tool" >/dev/null 2>&1 || fail "Не найдена команда $tool. Установка зависимостей описана в README.md."
 done
