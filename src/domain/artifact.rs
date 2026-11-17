@@ -12,7 +12,7 @@ pub const FILE_TYPES: &[&str] = &[
     "exe", "msi", "bin", "zip", "tar.gz", "dmg", "appimage", "deb", "rpm",
 ];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Artifact {
     pub id: String,
     pub release_id: String,
@@ -23,6 +23,8 @@ pub struct Artifact {
     pub sha256: String,
     pub storage_key: String,
     pub created_at: i64,
+    pub distribution_role: String,
+    pub updater_signature: Option<String>,
 }
 pub struct UploadMetadata {
     pub filename: String,

@@ -44,12 +44,25 @@ pub enum ServiceError {
     StorageUnavailable,
     #[error("Storage operations are busy; retry later")]
     StorageBusy,
+    #[error("Publication or channel changed; reload and review")]
+    PublicationConflict,
+    #[error("Release failed publication checks")]
+    PublicationBlocked(crate::domain::publication::PublicationValidation),
+    #[error("Multiple distributions match; specify target, format or purpose")]
+    AmbiguousArtifact,
+    #[error("Published updater configuration is invalid")]
+    UpdaterUnavailable,
+    #[error("Invalid updater signature or compatibility metadata")]
+    InvalidUpdater,
     #[error("Internal failure")]
     Internal(#[source] anyhow::Error),
 }
 impl From<sqlx::Error> for ServiceError {
     fn from(error: sqlx::Error) -> Self {
         if let sqlx::Error::Database(ref db) = error {
+            if db.message() == "release_locked" {
+                return Self::ReleaseLocked;
+            }
             if db.message() == "last_active_admin" {
                 return Self::LastAdmin;
             }

@@ -3,8 +3,11 @@ mod applications;
 mod artifacts;
 mod assets;
 mod auth;
+mod delivery;
+mod distribution;
 mod error;
 mod health;
+mod publication;
 mod releases;
 mod upload_body;
 
@@ -28,6 +31,10 @@ use error::ApiError;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub distribution: crate::services::distribution::PublicDistribution,
+    pub publishing: crate::services::publishing::ReleasePublishing,
+    pub manifests: crate::services::manifest::ManifestGeneration,
+    pub updater: crate::services::updater::TauriUpdater,
     pub storage_config: crate::config::StorageConfig,
     pub releases: crate::services::release::ReleaseManagement,
     pub artifacts: crate::services::artifact::ArtifactManagement,
@@ -44,6 +51,7 @@ pub fn router(state: AppState) -> Router {
     let v1 = public
         .nest("/auth", auth::router(state.clone()))
         .merge(admin::router(state.clone()))
+        .merge(distribution::api_router())
         .fallback(not_found);
     let api = Router::new().nest("/v1", v1).fallback(not_found).layer(
         SetResponseHeaderLayer::overriding(
@@ -53,6 +61,13 @@ pub fn router(state: AppState) -> Router {
     );
 
     Router::new()
+        .merge(distribution::documents_router())
+        .route("/admin", get(assets::serve))
+        .route("/admin/", get(assets::serve))
+        .route("/admin/{*path}", get(assets::panel))
+        .route("/favicon.svg", get(assets::serve))
+        .route("/index.html", get(assets::serve))
+        .route("/{slug}/manifest.json", get(publication::public_manifest))
         .route("/api", any(not_found))
         .nest("/api", api)
         .fallback(assets::serve)
@@ -62,7 +77,7 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
         .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")))
-        .layer(CompressionLayer::new().compress_when(DefaultPredicate::new().and(NotForContentType::const_new("application/octet-stream"))))
+        .layer(CompressionLayer::new().compress_when(DefaultPredicate::new().and(NotForContentType::const_new("application/octet-stream")).and(|_: axum::http::StatusCode, _: axum::http::Version, headers: &axum::http::HeaderMap, _: &axum::http::Extensions| !headers.contains_key(header::CONTENT_DISPOSITION))))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(TraceLayer::new_for_http()

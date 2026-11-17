@@ -54,6 +54,14 @@ impl ApplicationsRepository {
             .ok_or(ServiceError::NotFound)?;
         row.application()
     }
+    pub async fn by_slug_in(c: &mut SqliteConnection, slug: &str) -> Result<Application> {
+        sqlx::query_as::<_, StoredApplication>("SELECT * FROM applications WHERE slug=?")
+            .bind(slug)
+            .fetch_optional(c)
+            .await?
+            .ok_or(ServiceError::NotFound)?
+            .application()
+    }
     pub async fn get_in(c: &mut SqliteConnection, id: &str) -> Result<Application> {
         let row: StoredApplication = sqlx::query_as("SELECT * FROM applications WHERE id=?")
             .bind(id)

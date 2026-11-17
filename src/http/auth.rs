@@ -298,6 +298,11 @@ impl From<ServiceError> for ApiError {
             ServiceError::StorageFull => Self::StorageFull,
             ServiceError::StorageUnavailable => Self::StorageUnavailable,
             ServiceError::StorageBusy => Self::StorageBusy,
+            ServiceError::PublicationConflict => Self::PublicationConflict,
+            ServiceError::PublicationBlocked(validation) => Self::PublicationBlocked(validation),
+            ServiceError::InvalidUpdater => Self::InvalidUpdater,
+            ServiceError::AmbiguousArtifact => Self::AmbiguousArtifact,
+            ServiceError::UpdaterUnavailable => Self::UpdaterUnavailable,
             ServiceError::Internal(cause) => {
                 tracing::error!(error = ?cause, "Service operation failed");
                 Self::Internal

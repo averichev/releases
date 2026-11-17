@@ -42,7 +42,10 @@ impl ReleaseManagement {
         // Metadata only. Sorting in Rust uses actual SemVer precedence, including
         // arbitrarily large numeric prerelease identifiers. No lexicographic SQL.
         let mut items = self.repository.list(app).await?;
-        items.retain(|r| r.version.to_string().contains(q.search.trim()));
+        items.retain(|r| {
+            r.version.to_string().contains(q.search.trim())
+                && q.status.is_none_or(|status| r.status == status)
+        });
         items.sort_by(|a, b| {
             let order = match q.sort {
                 ReleaseSort::Version => a.version.cmp_precedence(&b.version),
@@ -81,9 +84,11 @@ impl ReleaseManagement {
             title,
             release_notes,
             status: ReleaseStatus::Draft,
+            revision: 0,
             created_at: now,
             updated_at: now,
             published_at: None,
+            channels: Vec::new(),
             artifact_count: 0,
             total_size_bytes: 0,
         };
@@ -121,6 +126,7 @@ impl ReleaseManagement {
         }
         release.updated_at = secrets::now().max(release.updated_at);
         ReleasesRepository::update(&mut tx, &release).await?;
+        release.revision += 1;
         tx.commit().await?;
         Ok(release)
     }
@@ -140,12 +146,15 @@ impl ReleaseManagement {
         Ok(())
     }
 }
-pub(super) async fn authorize(c: &mut sqlx::SqliteConnection, actor: &Identity) -> Result<()> {
+pub(super) async fn authorize(
+    c: &mut sqlx::SqliteConnection,
+    actor: &Identity,
+) -> Result<crate::domain::user::User> {
     let user = SessionsRepository::authorize(c, &actor.session_hash, secrets::now()).await?;
     if user.role != Role::Admin {
         return Err(ServiceError::Forbidden);
     }
-    Ok(())
+    Ok(user)
 }
 pub(super) fn draft(release: &Release) -> Result<()> {
     if release.status != ReleaseStatus::Draft {

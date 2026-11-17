@@ -14,6 +14,8 @@ struct StoredArtifact {
     sha256: String,
     storage_key: String,
     created_at: i64,
+    distribution_role: String,
+    updater_signature: Option<String>,
 }
 impl From<StoredArtifact> for Artifact {
     fn from(v: StoredArtifact) -> Self {
@@ -27,6 +29,8 @@ impl From<StoredArtifact> for Artifact {
             sha256: v.sha256,
             storage_key: v.storage_key,
             created_at: v.created_at,
+            distribution_role: v.distribution_role,
+            updater_signature: v.updater_signature,
         }
     }
 }
@@ -98,6 +102,20 @@ impl ArtifactsRepository {
                 other?;
             }
         }
+        Ok(())
+    }
+    pub async fn updater(
+        c: &mut SqliteConnection,
+        id: &str,
+        role: &str,
+        signature: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE artifacts SET distribution_role=?,updater_signature=? WHERE id=?")
+            .bind(role)
+            .bind(signature)
+            .bind(id)
+            .execute(c)
+            .await?;
         Ok(())
     }
     pub async fn delete(c: &mut SqliteConnection, release: &str, id: &str) -> Result<()> {

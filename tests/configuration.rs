@@ -33,6 +33,25 @@ fn environment_overrides_file_and_preserves_other_values() {
 fn invalid_or_misspelled_settings_fail_early() {
     for (key, value) in [
         ("VERUNA__SERVER__BIND", "invalid"),
+        (
+            "VERUNA__DOWNLOAD__PUBLIC_BASE_URL",
+            "https://user:pass@evil.test",
+        ),
+        ("VERUNA__DOWNLOAD__PUBLIC_BASE_URL", "http://evil.test"),
+        (
+            "VERUNA__DOWNLOAD__PUBLIC_BASE_URL",
+            "https://apps.example.test/path",
+        ),
+        (
+            "VERUNA__DOWNLOAD__PUBLIC_BASE_URL",
+            "https://apps.example.test/",
+        ),
+        (
+            "VERUNA__DOWNLOAD__PUBLIC_BASE_URL",
+            "https://apps.example.test?x=1",
+        ),
+        ("VERUNA__DOWNLOAD__DELIVERY_MODE", "invalid"),
+        ("VERUNA__DOWNLOAD__MAX_CONCURRENT_DOWNLOADS", "0"),
         ("VERUNA__SERVER__SHUTDOWN_TIMEOUT_SECONDS", "0"),
         ("VERUNA__DATABASE__MAX_CONNECTIONS", "0"),
         ("VERUNA__DATABASE__BUSY_TIMEOUT_SECONDS", "0"),

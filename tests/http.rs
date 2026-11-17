@@ -85,7 +85,6 @@ async fn api_and_asset_errors_never_fall_back_to_html() {
         "/assets/missing.js",
         "/admin/missing.js",
         "/artifacts/private.zip",
-        "/unknown",
         "/favicon-missing.svg",
     ] {
         let response = request(&router, Method::GET, path).await;
@@ -185,5 +184,19 @@ async fn embedded_ui_supports_nested_documents_assets_and_head() {
         );
         assert!(body(response).await.is_empty());
     }
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn unknown_public_application_is_a_404_document() {
+    let (_directory, pool, router) = setup().await;
+    let response = request(&router, Method::GET, "/unknown").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        response.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
     pool.close().await;
 }

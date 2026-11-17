@@ -37,9 +37,11 @@ pub(super) struct ReleaseDto {
     title: Option<String>,
     release_notes: String,
     status: &'static str,
+    revision: i64,
     created_at: i64,
     updated_at: i64,
     published_at: Option<i64>,
+    channels: Vec<String>,
     artifact_count: i64,
     total_size_bytes: i64,
 }
@@ -52,9 +54,11 @@ impl From<Release> for ReleaseDto {
             title: r.title,
             release_notes: r.release_notes,
             status: r.status.as_str(),
+            revision: r.revision,
             created_at: r.created_at,
             updated_at: r.updated_at,
             published_at: r.published_at,
+            channels: r.channels,
             artifact_count: r.artifact_count,
             total_size_bytes: r.total_size_bytes,
         }
@@ -90,6 +94,7 @@ struct ListRequest {
     page: Option<u32>,
     per_page: Option<u32>,
     search: String,
+    status: Option<String>,
     sort: Option<String>,
     order: Option<String>,
 }
@@ -137,6 +142,13 @@ async fn list(
                 page,
                 per_page,
                 search: q.search,
+                status: q
+                    .status
+                    .map(|s| {
+                        crate::domain::release::ReleaseStatus::parse(&s)
+                            .ok_or(ApiError::InvalidRelease)
+                    })
+                    .transpose()?,
                 sort: match q.sort.as_deref().unwrap_or("version") {
                     "version" => ReleaseSort::Version,
                     "created_at" => ReleaseSort::CreatedAt,

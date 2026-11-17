@@ -144,6 +144,27 @@ impl ApplicationCatalog {
         tx.commit().await?;
         Ok(app)
     }
+    pub async fn set_distribution(
+        &self,
+        actor: &Identity,
+        id: &str,
+        selector: Option<application::DistributionSelector>,
+    ) -> Result<()> {
+        if selector.as_ref().is_some_and(|s| !s.valid()) {
+            return Err(ServiceError::InvalidArtifact);
+        }
+        let mut tx = self.repository.write().await?;
+        Self::authorize(&mut tx, actor).await?;
+        ApplicationsRepository::get_in(&mut tx, id).await?;
+        crate::repositories::distribution::DistributionRepository::set_selector(
+            &mut tx,
+            id,
+            selector.as_ref(),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
     pub async fn icon(&self, id: &str) -> Result<Vec<u8>> {
         let app = self.get(id).await?;
         let key = app.icon_key.ok_or(ServiceError::NotFound)?;

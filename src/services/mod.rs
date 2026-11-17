@@ -9,3 +9,13 @@ pub mod users;
 
 pub mod artifact;
 pub mod release;
+
+pub mod publishing;
+
+pub mod publication_validation;
+
+pub mod manifest;
+
+pub mod updater;
+
+pub mod distribution;

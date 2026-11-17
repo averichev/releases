@@ -33,6 +33,8 @@ pub fn router(state: AppState) -> Router<AppState> {
     administrators
         .merge(super::applications::router())
         .merge(super::releases::router())
+        .merge(super::publication::router())
+        .merge(super::distribution::admin_router())
         .merge(super::artifacts::router(&state))
         .layer(middleware::from_fn_with_state(state, auth::require_session))
 }

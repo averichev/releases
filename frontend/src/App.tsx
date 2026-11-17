@@ -12,6 +12,7 @@ import Activate from './pages/Activate';
 import { sections } from './sections';
 
 const { Title, Paragraph } = Typography;
+const PublicApplication = lazy(() => import('./pages/PublicApplication'));
 const Users = lazy(() => import('./pages/Users'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Overview = lazy(() => import('./pages/Overview'));
@@ -42,7 +43,7 @@ function AdminLayout() {
             { key: 'profile', icon: <UserOutlined />, label: <Link to="/admin/profile">Профиль</Link> },
           ]} />
         </nav>
-        <div className="sidebar-note"><span className="status-dot" />Защищённый доступ<span>Этап 04</span></div>
+        <div className="sidebar-note"><span className="status-dot" />Защищённый доступ<span>Этап 06</span></div>
       </Layout.Sider>
       <Layout className="main-layout">
         <Layout.Header className="topbar">
@@ -57,17 +58,18 @@ function AdminLayout() {
 }
 
 function Placeholder({ title, description }: { title: string; description: string }) {
-  const withinApplication = title === 'Релизы' || title === 'Дистрибутивы';
+  const withinApplication = title === 'Релизы' || title === 'Дистрибутивы' || title === 'Каналы';
   return <>
     <div className="page-heading"><div className="eyebrow">ПАНЕЛЬ УПРАВЛЕНИЯ</div><Title level={1}>{title}</Title><Paragraph>{description}</Paragraph></div>
     <Card><Result icon={<SafetyCertificateOutlined />} title={withinApplication ? "Выберите приложение" : "Раздел запланирован"}
-      subTitle={withinApplication ? "Откройте приложение → Релизы. В каждом черновике можно управлять установщиками." : "Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."}
+      subTitle={withinApplication ? "Откройте приложение → Релизы или Каналы обновлений для управления версиями и файлами." : "Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."}
       extra={<Link to={withinApplication ? "/admin/applications" : "/admin"}><Button>{withinApplication ? "Открыть приложения" : "Вернуться к обзору"}</Button></Link>} /></Card>
   </>;
 }
 
 export function AppRoutes() {
-  return <AuthProvider><Routes>
+  return <Routes>
+    <Route element={<AuthProvider><Outlet /></AuthProvider>}>
     <Route path="/" element={<Navigate to="/admin" replace />} />
     <Route path="/admin/login" element={<Login />} />
     <Route path="/admin/activate" element={<Activate />} />
@@ -79,11 +81,13 @@ export function AppRoutes() {
       <Route path="applications" element={<Suspense fallback={<Spin />}><Applications /></Suspense>} />
       <Route path="applications/new" element={<Suspense fallback={<Spin />}><ApplicationCreate /></Suspense>} />
       <Route path="applications/:id/releases/:releaseId" element={<Suspense fallback={<Spin />}><ReleaseDetail /></Suspense>} />
-      {['applications/:id', 'applications/:id/settings', 'applications/:id/releases'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
+      {['applications/:id', 'applications/:id/settings', 'applications/:id/releases', 'applications/:id/channels', 'applications/:id/manifests', 'applications/:id/history', 'applications/:id/distribution'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
       {sections.filter((s) => s.path !== 'users' && s.path !== 'applications').map((section) => <Route key={section.path} path={section.path} element={<Placeholder title={section.title} description={section.description} />} />)}
       <Route path="*" element={<Result status="404" title="Страница не найдена" extra={<Link to="/admin">Вернуться к обзору</Link>} />} />
     </Route>
     </Route>
+    </Route>
+    <Route path="/:slug" element={<Suspense fallback={<Spin />}><PublicApplication /></Suspense>} />
     <Route path="*" element={<Space className="not-found"><Result status="404" title="Страница не найдена" extra={<Link to="/admin">Открыть панель</Link>} /></Space>} />
-  </Routes></AuthProvider>;
+  </Routes>;
 }

@@ -1,4 +1,4 @@
-# Черновики релизов и дистрибутивы — этап 4
+# Релизы и хранение дистрибутивов (этапы 4–6)
 
 ## Работа в панели
 
@@ -8,13 +8,13 @@
 4. Дождитесь ответа сервера после передачи 100%. Таблица покажет фактические размер и SHA-256. Проверьте скачивание, копирование хеша и **Проверить SHA-256**.
 5. Удалите файл или весь черновик, подтвердив действие. Обновите вложенную страницу в браузере: она должна открыться снова.
 
-Operator видит релизы и скачивает файлы, но не меняет данные. Новый релиз нельзя создать для архивного приложения; уже существующими черновиками можно управлять. Публикация, каналы, манифесты, публичные скачивания и API-токены отсутствуют.
+Operator видит релизы и скачивает файлы, но не меняет данные. Новый релиз нельзя создать для архивного приложения; уже существующими черновиками можно управлять. Публикация, каналы, манифесты и подписи добавлены на этапе 5: см. [release-management.md](release-management.md). Публичные скачивания реализованы: [публичное распространение](public-distribution.md). API-токены отсутствуют.
 
 ## Данные и инварианты
 
 Миграция `0004_releases_artifacts.sql` добавляет `releases` и `artifacts`. Связи используют UUID. UUID релиза, его приложение и created_at неизменяемы. Artifact — неизменяемый объект: для замены его нужно удалить и загрузить снова. Удаление релиза каскадно удаляет строки artifacts. Файловая система в каскад SQLite не входит.
 
-Состояние релиза только `draft`, published_at всегда NULL. PATCH меняет версию, title и release_notes; смена состояния не предусмотрена. В будущем новые состояния потребуют миграции ограничений и правил переходов. Нет пустых колонок подписи или предполагаемых updater-полей: подпись можно добавить к UUID артефакта вместе с конкретным протоколом.
+Новый релиз — `draft`, published_at=NULL. PATCH меняет версию, title и release_notes только у draft. На этапе 5 миграция 0005 добавляет `published`: после явной публикации релиз и его артефакты/подписи неизменяемы. Подробнее: [модель данных](data-model.md).
 
 Версию проверяет `semver`: trim и один lowercase `v` в начале нормализуются. `version` сохраняет build metadata, но UNIQUE(application_id, version_key) использует SemVer без `+build`. Поэтому `1.2.0`, `v1.2.0` и `1.2.0+build.15` конфликтуют внутри одного приложения. В разных приложениях одинаковые версии допустимы. Это сознательно исключает два релиза с одинаковым приоритетом перед добавлением выбора актуального релиза. Сортировка использует [Version::cmp_precedence](https://docs.rs/semver/1.0.28/semver/struct.Version.html#method.cmp_precedence), а не текстовое сравнение или Ord, учитывающий build metadata. Поиск и сортировка загружают только метаданные релизов одного приложения, затем выполняют пагинацию; это O(N) по числу его релизов и подходит текущему масштабу.
 
@@ -40,11 +40,11 @@ Operator видит релизы и скачивает файлы, но не м�
 | POST `/{releaseId}/artifacts/{artifactId}/verify` | `{valid: true или false}` |
 | GET `/artifact-options` (относительно admin) | `{targets,file_types,max_file_bytes,upload_idle_seconds}` |
 
-Список: page ≥ 1, per_page 1–100 (по умолчанию 20), search до 200 символов — буквальная регистрозависимая подстрока версии, sort = version/created_at/updated_at, order = asc/desc. По умолчанию SemVer по убыванию. Параметры поиска/пагинации панели сохраняются в URL.
+Список: page ≥ 1, per_page 1–100 (по умолчанию 20), search до 200 символов — буквальная регистрозависимая подстрока версии, sort = version/created_at/updated_at, order = asc/desc. Необязательный status=draft|published фильтрует состояние. По умолчанию SemVer по убыванию. Параметры поиска/пагинации панели сохраняются в URL.
 
 POST JSON: `{"version":"1.2.0","title":"Название","release_notes":"Изменения"}`. Обязательна только version. Название до 120 символов; пустое/null означает отсутствие названия. Описание до 20 000 символов, по умолчанию пустое. PATCH принимает непустое подмножество этих полей; title=null очищает название, null для version/release_notes запрещён. Неизвестные поля отвергаются. JSON ограничен 128 KiB.
 
-Release DTO: id, application_id, version, title, release_notes, status, created_at, updated_at, published_at, artifact_count, total_size_bytes. Artifact DTO: id, release_id, filename, target, file_type, size_bytes, sha256, created_at. Даты — Unix seconds UTC. Storage key и физические пути не раскрываются.
+Release DTO: id, application_id, version, title, release_notes, status, revision, channels, created_at, updated_at, published_at, artifact_count, total_size_bytes. Artifact DTO: id, release_id, filename, target, file_type, size_bytes, sha256, created_at, distribution_role, signature_present. Даты — Unix seconds UTC. Storage key и физические пути не раскрываются.
 
 Multipart содержит **target**, затем необязательный **file_type**, затем ровно один последний **file** с filename. Поля метаданных не должны быть файлами. Неизвестные, повторяющиеся и расположенные после файла поля запрещены. Пример с уже полученными cookie и CSRF:
 

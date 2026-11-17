@@ -98,6 +98,8 @@ impl ArtifactManagement {
             sha256: upload.pending.sha256(),
             storage_key: upload.pending.key.clone(),
             created_at: now,
+            distribution_role: "installer".into(),
+            updater_signature: None,
         };
         let mut tx = self.releases.write().await?;
         authorize(&mut tx, actor).await?;
@@ -136,6 +138,53 @@ impl ArtifactManagement {
         tx.commit().await?;
         remove_after_commit(&self.storage, &artifact.storage_key).await;
         Ok(())
+    }
+    pub async fn set_updater(
+        &self,
+        actor: &Identity,
+        app: &str,
+        release: &str,
+        id: &str,
+        role: Option<&str>,
+        signature: Option<Option<&[u8]>>,
+    ) -> Result<Artifact> {
+        let mut tx = self.releases.write().await?;
+        authorize(&mut tx, actor).await?;
+        draft(&ReleasesRepository::get_in(&mut tx, app, release).await?)?;
+        let mut artifact = ArtifactsRepository::list_in(&mut tx, release)
+            .await?
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or(ServiceError::NotFound)?;
+        if let Some(role) = role {
+            if !matches!(role, "installer" | "updater")
+                || (role == "updater"
+                    && crate::domain::publication::compatible_tauri_target(&artifact).is_none())
+            {
+                return Err(ServiceError::InvalidUpdater);
+            }
+            artifact.distribution_role = role.into();
+            if role == "installer" {
+                artifact.updater_signature = None;
+            }
+        }
+        if let Some(value) = signature {
+            if artifact.distribution_role != "updater" {
+                return Err(ServiceError::InvalidUpdater);
+            }
+            artifact.updater_signature =
+                value.map(crate::services::updater::signature).transpose()?;
+        }
+        ArtifactsRepository::updater(
+            &mut tx,
+            id,
+            &artifact.distribution_role,
+            artifact.updater_signature.as_deref(),
+        )
+        .await?;
+        ReleasesRepository::touch(&mut tx, release, secrets::now()).await?;
+        tx.commit().await?;
+        Ok(artifact)
     }
     pub async fn verify(
         &self,

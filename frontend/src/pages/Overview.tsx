@@ -52,14 +52,14 @@ export default function Overview() {
         <Card className="intro-card">
           <Tag color="green" variant="filled"><CheckCircleOutlined /> Каталог приложений</Tag>
           <Title level={2}>Каждому продукту —<br />постоянный адрес.</Title>
-          <Paragraph>Создавайте черновики релизов, загружайте установщики и проверяйте SHA-256. Управление релизами доступно в карточке каждого приложения.</Paragraph>
+          <Paragraph>Создавайте и публикуйте релизы, переключайте каналы обновлений и проверяйте манифесты. Управление доступно в карточке каждого приложения.</Paragraph>
           <Link className="intro-link" to="/admin/applications">Перейти к приложениям <ArrowRightOutlined /></Link>
         </Card>
         <HealthCard />
       </div>
       <Alert className="stage-notice" type="info" showIcon icon={<SafetyCertificateOutlined />}
         title="Доступ к панели защищён"
-        description="Операторы просматривают каталог, релизы и скачивают файлы. Администраторы управляют черновиками, установщиками и доступом команды." />
+        description="Операторы просматривают каталог, релизы и скачивают файлы. Администраторы публикуют релизы, управляют каналами, установщиками и доступом команды." />
       <div className="section-heading"><Title level={3}>Разделы платформы</Title><Text type="secondary">Каталог и распространение</Text></div>
       <div className="section-grid">
         {sections.slice(0, 4).map((section) => (

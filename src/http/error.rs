@@ -31,6 +31,11 @@ pub enum ApiError {
     StorageFull,
     StorageUnavailable,
     StorageBusy,
+    PublicationConflict,
+    PublicationBlocked(crate::domain::publication::PublicationValidation),
+    InvalidUpdater,
+    AmbiguousArtifact,
+    UpdaterUnavailable,
 }
 
 #[derive(Serialize)]
@@ -47,6 +52,36 @@ struct ErrorBody {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::AmbiguousArtifact => (
+                StatusCode::CONFLICT,
+                "ambiguous_artifact",
+                "Specify target, format or purpose, or configure the default distribution",
+            ),
+            Self::UpdaterUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "updater_unavailable",
+                "Updater package is unavailable; contact the application administrator",
+            ),
+            Self::PublicationBlocked(validation) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    [(axum::http::header::CACHE_CONTROL, "no-store")],
+                    Json(serde_json::json!({
+                        "error": {"code": "publication_blocked", "message": "Release failed publication checks"},
+                        "validation": super::publication::validation_dto(&validation)
+                    })),
+                ).into_response();
+            }
+            Self::PublicationConflict => (
+                StatusCode::CONFLICT,
+                "publication_conflict",
+                "Release or channel changed; reload and review",
+            ),
+            Self::InvalidUpdater => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_updater",
+                "Invalid updater role, platform, format or signature; upload the generated .sig, never a private key",
+            ),
             Self::InvalidRelease => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_release",

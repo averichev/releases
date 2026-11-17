@@ -2,12 +2,12 @@ import { ApiError } from './client';
 import { applicationPath } from './applications';
 export interface Release {
   id: string; application_id: string; version: string; title: string | null; release_notes: string;
-  status: 'draft'; created_at: number; updated_at: number; published_at: number | null; artifact_count: number; total_size_bytes: number;
+  status: 'draft' | 'published'; revision: number; channels: string[]; created_at: number; updated_at: number; published_at: number | null; artifact_count: number; total_size_bytes: number;
 }
 export interface ReleaseValues { version: string; title?: string; release_notes: string }
 export interface ReleasePage { items: Release[]; total: number; page: number; per_page: number }
 export interface Artifact {
-  id: string; release_id: string; filename: string; target: string; file_type: string; size_bytes: number; sha256: string; created_at: number;
+  id: string; release_id: string; filename: string; target: string; file_type: string; size_bytes: number; sha256: string; created_at: number; distribution_role: 'installer' | 'updater'; signature_present: boolean;
 }
 export interface UploadOptions { targets: string[]; file_types: string[]; max_file_bytes: number; upload_idle_seconds: number }
 export const releasesPath = (app: string) => `${applicationPath(app)}/releases`;

@@ -26,3 +26,9 @@ filter = "info,tower_http=info"
 public_origin = "http://127.0.0.1:8080"
 session_ttl_seconds = 43200
 invitation_ttl_seconds = 86400
+
+# Trusted URL source for manifests/updater; never inferred from Host.
+[download]
+public_base_url = "http://127.0.0.1:8080"
+delivery_mode = "direct" # nginx requires deploy/nginx/veruna.conf
+max_concurrent_downloads = 64

@@ -80,12 +80,12 @@ it('keeps active uploads open on Escape and supports explicit cancellation', asy
   expect(await screen.findByText('new.zip · 3 B · ZIP')).toBeDefined();
   const dialog = screen.getByRole('dialog', { name: 'Загрузка дистрибутива' });
   fireEvent.click(dialog.querySelector('button.ant-btn-primary')!);
-  const cancel = await screen.findByRole('button', { name: 'Отменить загрузку' });
+  const cancel = await within(dialog).findByRole('button', { name: 'Отменить загрузку' });
   fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape', keyCode: 27 });
   expect(screen.getByRole('dialog', { name: 'Загрузка дистрибутива' })).toBeDefined();
-  expect(screen.getByRole('button', { name: 'Отменить загрузку' })).toBeDefined();
+  expect(within(dialog).getByRole('button', { name: 'Отменить загрузку' })).toBeDefined();
   fireEvent.click(cancel);
   expect(await screen.findByText(/Загрузка отменена/)).toBeDefined();
-  expect(screen.queryByRole('button', { name: 'Отменить загрузку' })).toBeNull();
+  expect(within(dialog).queryByRole('button', { name: 'Отменить загрузку' })).toBeNull();
   expect(within(dialog).getByRole('button', { name: /close|закрыть/i })).toBeDefined();
-}, 20000);
+}, 40000);

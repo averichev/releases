@@ -4,7 +4,7 @@ use crate::{
 };
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
-const SELECT: &str = "SELECT r.*, (SELECT count(*) FROM artifacts a WHERE a.release_id=r.id) AS artifact_count, (SELECT coalesce(sum(size_bytes),0) FROM artifacts a WHERE a.release_id=r.id) AS total_size_bytes FROM releases r";
+const SELECT: &str = "SELECT r.*, (SELECT coalesce(group_concat(name),'') FROM (SELECT c.name FROM release_channels c JOIN channel_releases cr ON cr.channel_id=c.id WHERE cr.release_id=r.id ORDER BY c.name)) AS channels, (SELECT count(*) FROM artifacts a WHERE a.release_id=r.id) AS artifact_count, (SELECT coalesce(sum(size_bytes),0) FROM artifacts a WHERE a.release_id=r.id) AS total_size_bytes FROM releases r";
 #[derive(sqlx::FromRow)]
 struct StoredRelease {
     id: String,
@@ -13,9 +13,11 @@ struct StoredRelease {
     title: Option<String>,
     release_notes: String,
     status: String,
+    revision: i64,
     created_at: i64,
     updated_at: i64,
     published_at: Option<i64>,
+    channels: String,
     artifact_count: i64,
     total_size_bytes: i64,
 }
@@ -31,9 +33,16 @@ impl StoredRelease {
             status: ReleaseStatus::parse(&self.status).ok_or_else(|| {
                 ServiceError::Internal(anyhow::anyhow!("Invalid stored release status"))
             })?,
+            revision: self.revision,
             created_at: self.created_at,
             updated_at: self.updated_at,
             published_at: self.published_at,
+            channels: self
+                .channels
+                .split(',')
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+                .collect(),
             artifact_count: self.artifact_count,
             total_size_bytes: self.total_size_bytes,
         })
@@ -85,16 +94,18 @@ impl ReleasesRepository {
         Ok(())
     }
     pub async fn update(c: &mut SqliteConnection, r: &Release) -> Result<()> {
-        conflict(sqlx::query("UPDATE releases SET version=?,version_key=?,title=?,release_notes=?,updated_at=? WHERE id=?")
+        conflict(sqlx::query("UPDATE releases SET version=?,version_key=?,title=?,release_notes=?,updated_at=?,revision=revision+1 WHERE id=?")
             .bind(r.version.to_string()).bind(release::version_key(&r.version)).bind(&r.title).bind(&r.release_notes).bind(r.updated_at).bind(&r.id).execute(c).await)?;
         Ok(())
     }
     pub async fn touch(c: &mut SqliteConnection, id: &str, now: i64) -> Result<()> {
-        sqlx::query("UPDATE releases SET updated_at=max(updated_at,?) WHERE id=?")
-            .bind(now)
-            .bind(id)
-            .execute(c)
-            .await?;
+        sqlx::query(
+            "UPDATE releases SET updated_at=max(updated_at,?),revision=revision+1 WHERE id=?",
+        )
+        .bind(now)
+        .bind(id)
+        .execute(c)
+        .await?;
         Ok(())
     }
     pub async fn delete(c: &mut SqliteConnection, id: &str) -> Result<()> {

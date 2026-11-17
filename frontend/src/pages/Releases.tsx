@@ -30,7 +30,7 @@ export default function Releases({ application, administrator }: { application: 
     {error ? <Alert type="error" showIcon title="Не удалось загрузить релизы" description={error} action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : <Table<Release> rowKey="id" loading={!page} dataSource={page?.items} scroll={{ x: 850 }} locale={{ emptyText: <Empty description="Релизов пока нет" /> }} pagination={{ current: page?.page ?? 1, total: page?.total ?? 0, pageSize: 20, showSizeChanger: false, onChange: (page) => change({ page: String(page) }) }} columns={[
       { title: 'Версия', dataIndex: 'version', render: (version: string, release) => <Link to={releaseRoute(application.id, release.id)}>{version}</Link> },
       { title: 'Название', dataIndex: 'title', render: (value: string | null) => value || '—' },
-      { title: 'Статус', render: () => <Tag>Draft</Tag> }, { title: 'Создан', dataIndex: 'created_at', render: date },
+      { title: 'Статус', render: (_, release) => <Tag color={release.status === 'published' ? 'green' : undefined}>{release.status === 'published' ? 'Published' : 'Draft'}</Tag> }, { title: 'Создан', dataIndex: 'created_at', render: date },
       { title: 'Файлы', dataIndex: 'artifact_count' }, { title: 'Размер', dataIndex: 'total_size_bytes', render: size },
       { title: 'Действия', render: (_, release) => <Link to={releaseRoute(application.id, release.id)}>Открыть</Link> },
     ]} />}

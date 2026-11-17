@@ -21,6 +21,7 @@ pub trait ArtifactStorage: Send + Sync {
     fn begin(&self) -> impl Future<Output = Result<PendingUpload>> + Send;
     fn promote(&self, upload: &mut PendingUpload) -> impl Future<Output = Result<()>> + Send;
     fn open(&self, key: &str, size: i64) -> impl Future<Output = Result<tokio::fs::File>> + Send;
+    fn internal_uri(&self, key: &str) -> Result<String>;
     fn remove(&self, key: &str) -> impl Future<Output = Result<()>> + Send;
     fn verify(
         &self,
@@ -270,6 +271,12 @@ impl ArtifactStorage for LocalArtifactStorage {
             Ok(tokio::fs::File::from_std(file.into_std()))
         })
         .await
+    }
+    fn internal_uri(&self, key: &str) -> Result<String> {
+        if !valid_key(key) {
+            return Err(ServiceError::InvalidArtifact);
+        }
+        Ok(format!("/_veruna_files/{key}"))
     }
     async fn remove(&self, key: &str) -> Result<()> {
         if !valid_key(key) {

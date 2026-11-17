@@ -4,3 +4,5 @@ pub mod user;
 
 pub mod artifact;
 pub mod release;
+
+pub mod publication;

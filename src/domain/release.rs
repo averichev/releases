@@ -3,19 +3,25 @@ use semver::{BuildMetadata, Version};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReleaseStatus {
     Draft,
+    Published,
 }
 impl ReleaseStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Draft => "draft",
+            Self::Published => "published",
         }
     }
     pub fn parse(value: &str) -> Option<Self> {
-        (value == "draft").then_some(Self::Draft)
+        match value {
+            "draft" => Some(Self::Draft),
+            "published" => Some(Self::Published),
+            _ => None,
+        }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Release {
     pub id: String,
     pub application_id: String,
@@ -23,9 +29,11 @@ pub struct Release {
     pub title: Option<String>,
     pub release_notes: String,
     pub status: ReleaseStatus,
+    pub revision: i64,
     pub created_at: i64,
     pub updated_at: i64,
     pub published_at: Option<i64>,
+    pub channels: Vec<String>,
     pub artifact_count: i64,
     pub total_size_bytes: i64,
 }
@@ -44,6 +52,7 @@ pub struct ReleaseQuery {
     pub page: u32,
     pub per_page: u32,
     pub search: String,
+    pub status: Option<ReleaseStatus>,
     pub sort: ReleaseSort,
     pub descending: bool,
 }

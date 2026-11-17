@@ -8,7 +8,7 @@ export const sections = [
   { path: 'applications', title: 'Приложения', icon: <AppstoreOutlined />,
     description: 'Каталог распространяемых продуктов и их настройки.' },
   { path: 'releases', title: 'Релизы', icon: <RocketOutlined />,
-    description: 'Черновики версий в карточках приложений.' },
+    description: 'Черновики и опубликованные версии в карточках приложений.' },
   { path: 'artifacts', title: 'Дистрибутивы', icon: <CloudDownloadOutlined />,
     description: 'Установщики и контрольные суммы внутри релизов.' },
   { path: 'channels', title: 'Каналы', icon: <DeploymentUnitOutlined />,

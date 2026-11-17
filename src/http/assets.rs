@@ -47,6 +47,19 @@ pub async fn serve(method: Method, uri: Uri) -> Response {
     ApiError::NotFound.into_response()
 }
 
+pub(super) async fn panel(
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    method: Method,
+) -> Response {
+    serve(method, uri).await
+}
+pub(super) fn document(method: &Method) -> Response {
+    match Assets::get("index.html") {
+        Some(asset) => file_response(asset, "text/html; charset=utf-8", "no-store", method),
+        None => ApiError::Internal.into_response(),
+    }
+}
+
 fn file_response(
     asset: rust_embed::EmbeddedFile,
     mime: &str,

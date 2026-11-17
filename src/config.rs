@@ -17,6 +17,31 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub logging: LoggingConfig,
     pub auth: AuthConfig,
+    pub download: DownloadConfig,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DeliveryMode {
+    #[default]
+    Direct,
+    Nginx,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DownloadConfig {
+    pub public_base_url: String,
+    pub delivery_mode: DeliveryMode,
+    pub max_concurrent_downloads: usize,
+}
+impl Default for DownloadConfig {
+    fn default() -> Self {
+        Self {
+            public_base_url: "http://127.0.0.1:8080".into(),
+            delivery_mode: DeliveryMode::Direct,
+            max_concurrent_downloads: 64,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,6 +238,21 @@ impl AppConfig {
         ensure!(
             (60..=604_800).contains(&self.auth.invitation_ttl_seconds),
             "auth.invitation_ttl_seconds must be between 60 and 604800"
+        );
+        let base = url::Url::parse(&self.download.public_base_url)
+            .context("Invalid download.public_base_url")?;
+        ensure!(
+            base.origin().ascii_serialization() == self.download.public_base_url
+                && base.username().is_empty()
+                && base.password().is_none()
+                && (base.scheme() == "https"
+                    || (base.scheme() == "http"
+                        && matches!(base.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))),
+            "download.public_base_url must be an HTTPS origin, or HTTP on loopback, without path or trailing slash"
+        );
+        ensure!(
+            (1..=4096).contains(&self.download.max_concurrent_downloads),
+            "download.max_concurrent_downloads must be between 1 and 4096"
         );
         tracing_subscriber::EnvFilter::try_new(&self.logging.filter)
             .context("Invalid logging.filter")?;

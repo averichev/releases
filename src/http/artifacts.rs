@@ -43,7 +43,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
 }
 #[derive(Serialize)]
-struct ArtifactDto {
+pub(super) struct ArtifactDto {
     id: String,
     release_id: String,
     filename: String,
@@ -52,6 +52,8 @@ struct ArtifactDto {
     size_bytes: i64,
     sha256: String,
     created_at: i64,
+    distribution_role: String,
+    signature_present: bool,
 }
 impl From<Artifact> for ArtifactDto {
     fn from(a: Artifact) -> Self {
@@ -64,6 +66,8 @@ impl From<Artifact> for ArtifactDto {
             size_bytes: a.size_bytes,
             sha256: a.sha256,
             created_at: a.created_at,
+            distribution_role: a.distribution_role,
+            signature_present: a.updater_signature.is_some(),
         }
     }
 }

@@ -19,6 +19,11 @@ const messages: Record<string, string> = {
   invalid_release: 'Проверьте SemVer (например, 1.2.0 или 2.0.0-beta.1), название до 120 и описание до 20 000 символов.',
   release_version_exists: 'Релиз с этой версией уже существует. Build metadata после + не создаёт отдельную версию.',
   release_locked: 'Нужен черновик релиза. Создание релиза доступно только для активного приложения.',
+  publication_conflict: 'Канал или релиз изменён другим администратором. Обновите данные и проверьте действие снова.',
+  publication_blocked: 'Публикация запрещена: исправьте ошибки проверки готовности.',
+  ambiguous_artifact: 'Подходит несколько файлов. Укажите платформу и формат или настройте дистрибутив по умолчанию.',
+  updater_unavailable: 'Обновление недоступно: проверьте пакет и подпись в панели администратора.',
+  invalid_updater: 'Нужен совместимый updater-пакет и корректный файл .sig от Tauri. Приватные ключи не принимаются.',
   invalid_artifact: 'Проверьте имя файла, платформу и формат. Для файла без расширения укажите формат явно.',
   artifact_exists: 'Файл для этой платформы и формата уже есть. Сначала удалите его или выберите другую комбинацию.',
   payload_too_large: 'Размер файла или запроса превышает серверный лимит.',
@@ -29,7 +34,7 @@ const messages: Record<string, string> = {
   invalid_icon: 'Выберите PNG, JPEG или WebP до 2 МиБ, не более 1024×1024 пикселей.',
 };
 export class ApiError extends Error {
-  constructor(public status: number, public code: string) { super(messages[code] ?? 'Не удалось выполнить запрос. Повторите позже.'); }
+  constructor(public status: number, public code: string, public details?: unknown) { super(messages[code] ?? 'Не удалось выполнить запрос. Повторите позже.'); }
 }
 export async function api<T>(path: string, method = 'GET', data?: unknown, signal?: AbortSignal, timeoutMs = 15000): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -60,7 +65,7 @@ function responseError(status: number, payload: unknown, path: string, requestCs
     typeof payload.error === 'object' && payload.error !== null && 'code' in payload.error && typeof payload.error.code === 'string'
     ? payload.error.code : 'internal_error';
   if (status === 401 && code !== 'invalid_credentials' && path !== '/auth/me' && requestCsrf === csrfToken) window.dispatchEvent(new Event('session-expired'));
-  return new ApiError(status, code);
+  return new ApiError(status, code, payload);
 }
 /** XHR sends the File directly; progress comes from browser transport events. */
 export function upload<T>(path: string, data: FormData, signal: AbortSignal, onProgress: (percent: number) => void): Promise<T> {

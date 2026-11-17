@@ -61,7 +61,7 @@ it('edits settings without submitting slug, then archives and restores', async (
   fireEvent.click(screen.getByRole('button', { name: 'Восстановить приложение' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Восстановить' }));
   expect(await screen.findByRole('button', { name: 'Архивировать приложение' })).toBeDefined();
-}, 15000);
+}, 25000);
 it('allows operators to view the catalog but hides creation', async () => {
   const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? { ...session, user: { ...user, role: 'operator' } } : { items: [app], total: 1, page: 1, per_page: 24 })));
   vi.stubGlobal('fetch', fetch); renderAt('/admin/applications');

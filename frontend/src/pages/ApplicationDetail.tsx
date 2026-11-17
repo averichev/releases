@@ -5,6 +5,10 @@ import { useAuth } from '../auth/Auth';
 import { api, ApiError } from '../api/client';
 import { applicationError, applicationPath, date, saveIcon, type Application, type ApplicationValues } from '../api/applications';
 import Releases from './Releases';
+import Channels from './Channels';
+import Distribution from './Distribution';
+import Manifests from './Manifests';
+import PublicationHistory from './PublicationHistory';
 import ApplicationForm, { ApplicationIcon, ApplicationTags, IconPicker } from './ApplicationForm';
 
 function Settings({ application, onChange, iconError }: { application: Application; onChange: (app: Application) => void; iconError?: string }) {
@@ -46,7 +50,7 @@ export default function ApplicationDetail() {
   const { id = '' } = useParams(); const { state } = useAuth(); const location = useLocation(); const navigate = useNavigate();
   const [application, setApplication] = useState<Application>(); const [error, setError] = useState(''); const [missing, setMissing] = useState(false); const [attempt, setAttempt] = useState(0);
   const administrator = state.kind === 'ready' && state.user.role === 'admin';
-  const tab = location.pathname.endsWith('/settings') ? 'settings' : location.pathname.endsWith('/releases') ? 'releases' : 'overview';
+  const tab = ['settings', 'releases', 'channels', 'manifests', 'history', 'distribution'].find((key) => location.pathname.endsWith(`/${key}`)) ?? 'overview';
   const base = `/admin/applications/${encodeURIComponent(id)}`;
   useEffect(() => {
     const controller = new AbortController(); setError(''); setMissing(false); setApplication(undefined);
@@ -64,7 +68,9 @@ export default function ApplicationDetail() {
     {application.status === 'archived' && <Alert className="archive-notice" type="warning" showIcon title="Приложение в архиве" description="Публичность сохранена как настройка. Архивный статус сохраняется до восстановления администратором." />}
     <Tabs activeKey={tab} onChange={(key) => navigate(key === 'overview' ? base : `${base}/${key}`)} items={[
       { key: 'overview', label: <Link to={base}>Обзор</Link> }, { key: 'releases', label: <Link to={`${base}/releases`}>Релизы</Link> },
-      ...(administrator ? [{ key: 'settings', label: <Link to={`${base}/settings`}>Настройки</Link> }] : []),
+      { key: 'distribution', label: <Link to={`${base}/distribution`}>Распространение</Link> },
+      { key: 'channels', label: <Link to={`${base}/channels`}>Каналы обновлений</Link> }, { key: 'history', label: <Link to={`${base}/history`}>История</Link> },
+      ...(administrator ? [{ key: 'manifests', label: <Link to={`${base}/manifests`}>Манифесты</Link> }, { key: 'settings', label: <Link to={`${base}/settings`}>Настройки</Link> }] : []),
     ]} />
     {tab === 'overview' && <Card><Typography.Title level={2}>О приложении</Typography.Title><Typography.Paragraph className="application-full-description">{application.description || 'Описание не добавлено'}</Typography.Paragraph>
       <Descriptions column={1} size="small" items={[
@@ -74,6 +80,10 @@ export default function ApplicationDetail() {
       ]} />
     </Card>}
     {tab === 'releases' && <Releases application={application} administrator={administrator} />}
+    {tab === 'distribution' && <Distribution application={application} administrator={administrator} />}
+    {tab === 'channels' && <Channels application={application} administrator={administrator} />}
+    {tab === 'history' && <PublicationHistory app={id} />}
+    {tab === 'manifests' && (administrator ? <Manifests application={application} /> : <Result status="403" title="Доступ ограничен" />)}
     {tab === 'settings' && (administrator ? <Settings key={application.id} application={application} onChange={setApplication} iconError={typeof location.state?.iconError === 'string' ? location.state.iconError as string : undefined} /> : <Result status="403" title="Доступ ограничен" subTitle="Изменять настройки приложения может администратор." />)}
   </>;
 }

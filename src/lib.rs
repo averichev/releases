@@ -52,7 +52,24 @@ pub async fn application_state(
     let sessions = repositories::sessions::SessionsRepository::new(database.clone());
     let storage = LocalArtifactStorage::new(&config.storage);
     let releases = repositories::release::ReleasesRepository::new(database.clone());
+    let channels = repositories::channel::ChannelsRepository::new(database.clone());
+    let validator = services::publication_validation::PublicationValidator::new(storage.clone());
+    let distribution = services::distribution::PublicDistribution::new(
+        repositories::distribution::DistributionRepository::new(database.clone()),
+        channels.clone(),
+        storage.clone(),
+        config.download.clone(),
+    );
     Ok(http::AppState {
+        publishing: services::publishing::ReleasePublishing::new(
+            channels.clone(),
+            releases.clone(),
+            validator.clone(),
+            repositories::publication_history::PublicationHistoryRepository::new(database.clone()),
+        ),
+        manifests: services::manifest::ManifestGeneration::new(distribution.clone()),
+        updater: services::updater::TauriUpdater::new(distribution.clone()),
+        distribution,
         storage_config: config.storage.clone(),
         releases: services::release::ReleaseManagement::new(releases.clone(), storage.clone()),
         artifacts: services::artifact::ArtifactManagement::new(
