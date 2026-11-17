@@ -166,6 +166,7 @@ pub struct TauriPreview {
     pub message: &'static str,
     pub selected_version: Option<String>,
     pub artifact_id: Option<String>,
+    pub artifact_filename: Option<String>,
     pub signature_present: bool,
     pub public_downloads_available: bool,
     pub response: Option<TauriResponse>,
@@ -230,6 +231,7 @@ impl TauriUpdater {
             message: "В канале нет опубликованного релиза.",
             selected_version: None,
             artifact_id: None,
+            artifact_filename: None,
             signature_present: false,
             public_downloads_available: public_application(&app).is_ok(),
             response: None,
@@ -265,6 +267,7 @@ impl TauriUpdater {
             }
             UpdateDecision::Available(selection) => {
                 p.artifact_id = Some(selection.artifact.id.clone());
+                p.artifact_filename = Some(selection.artifact.filename.clone());
                 p.signature_present = true;
                 match self.distribution.check_artifact(&selection.artifact).await {
                     Ok(()) => {

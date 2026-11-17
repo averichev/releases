@@ -60,7 +60,7 @@ async fn creates_configured_paths_and_applies_baseline_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(migrations, 6);
+    assert_eq!(migrations, 7);
     pool.close().await;
 }
 
@@ -125,7 +125,7 @@ async fn catalog_migration_preserves_an_existing_identity_database() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        6
+        7
     );
 }
 
@@ -198,6 +198,13 @@ async fn publication_migration_preserves_stage_four_objects_and_backfills_channe
         .await
         .unwrap();
     assert_eq!(channels.len(), 2);
+    let public_key: Option<String> =
+        sqlx::query_scalar("SELECT tauri_public_key FROM applications WHERE id=?")
+            .bind(&app)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(public_key.is_none());
     for c in channels {
         assert!(uuid::Uuid::parse_str(&c.id).is_ok());
         assert_eq!(c.release_count, 0);

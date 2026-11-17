@@ -132,6 +132,20 @@ def main():
             call(application_path + "/restore", "POST", csrf=csrf)
             nested, nested_headers = call(f'/admin/applications/{application["id"]}/settings')
             assert nested_headers["Content-Type"].startswith("text/html") and nested == html
+            integration_path = application_path + "/integrations/tauri"
+            nested, nested_headers = call(f'/admin/applications/{application["id"]}/integrations/tauri?step=3&channel=beta')
+            assert nested == html and nested_headers["Content-Type"].startswith("text/html")
+            integration, _ = call(integration_path)
+            assert integration["public_key"] is None and integration["configuration"] is None and not integration["ready"]
+            # Syntactic public-key fixture only; this smoke does not claim a client installation.
+            public_key = base64.b64encode(("untrusted comment: smoke public key\n" + base64.b64encode(b"Ed" + bytes(40)).decode() + "\n").encode()).decode()
+            call(integration_path, "PUT", {"public_key": public_key}, expected=403)
+            call(integration_path, "PUT", {"public_key": public_key}, csrf, 204)
+            call(integration_path, "PUT", {"private_key": "never accepted"}, csrf, 400)
+            integration, _ = call(integration_path + "?channel=beta")
+            assert integration["public_key"] == public_key
+            assert integration["configuration"]["plugins"]["updater"]["pubkey"] == public_key
+            assert integration["endpoint"] == base + "/api/v1/updates/tauri/catalog-smoke/beta/{{target}}/{{arch}}/{{current_version}}"
             release, _ = call(application_path + "/releases", "POST", {"version": " v1.2.0 ", "release_notes": "Smoke changes"}, csrf, 201)
             assert release["version"] == "1.2.0" and release["status"] == "draft" and release["published_at"] is None
             release_path = application_path + "/releases/" + release["id"]
@@ -172,6 +186,10 @@ def main():
             call(release_path, "DELETE", csrf=operator["csrf_token"], expected=403)
             call(application_path, "PATCH", {"name": "Forbidden"}, operator["csrf_token"], 403)
             call(application_path + "/archive", "POST", csrf=operator["csrf_token"], expected=403)
+            call(integration_path)
+            call(integration_path, "PUT", {"public_key": public_key}, operator["csrf_token"], 403)
+            call(integration_path + "/readiness", "POST", csrf=operator["csrf_token"])
+            call(application_path + "/updater/tauri/preview", "POST", {"channel": "stable", "target": "windows-x86_64", "current_version": "1.0.0"}, operator["csrf_token"])
             call("/api/v1/auth/logout", "POST", csrf=operator["csrf_token"], expected=204)
             recovery = subprocess.run([str(binary), "admin", "reset-password", "--stdin"],
                                       input="owner\n", text=True, capture_output=True,
@@ -247,16 +265,17 @@ def main():
             assert (root / "storage/artifacts").is_dir()
             with sqlite3.connect(root / "state/db/releases.sqlite") as database:
                 assert database.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-                assert database.execute("SELECT count(*) FROM _sqlx_migrations WHERE success = 1").fetchone()[0] == 6
+                assert database.execute("SELECT count(*) FROM _sqlx_migrations WHERE success = 1").fetchone()[0] == 7
                 assert database.execute("SELECT count(*) FROM user_tokens").fetchone()[0] == 0
                 assert database.execute("SELECT slug FROM applications").fetchone()[0] == "catalog-smoke"
+                assert database.execute("SELECT tauri_public_key FROM applications").fetchone()[0] == public_key
             assert len(list((root / "storage/icons").glob("*.png"))) == 1
             process.send_signal(signal.SIGTERM)
             assert process.wait(timeout=20) == 0, log_path.read_text()
             logs = log_path.read_text()
             assert "Veruna Releases stopped" in logs
             assert all(value not in logs for value in secret_values), "Secret leaked into logs"
-            print("Smoke passed: standalone assets, CLI bootstrap/recovery, sessions/CSRF, catalog lifecycle/search, icons, draft releases, multipart uploads/SHA-256/downloads/deletion, publication/channels/rollback/history, public downloads/HEAD/Range/manifests/privacy, Tauri HTTP/signature/preview, immutability, nested routes, role boundaries, safe logs, WAL, migrations, SIGTERM.")
+            print("Smoke passed: standalone assets, CLI bootstrap/recovery, sessions/CSRF, catalog lifecycle/search, icons, draft releases, multipart uploads/SHA-256/downloads/deletion, publication/channels/rollback/history, public downloads/HEAD/Range/manifests/privacy, Tauri integration/public key/HTTP/signature/preview, immutability, nested routes, role boundaries, safe logs, WAL, migrations, SIGTERM.")
         finally:
             if process.poll() is None:
                 process.kill()

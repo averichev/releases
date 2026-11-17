@@ -120,6 +120,26 @@ impl ApplicationsRepository {
             .bind(app.updated_at).bind(&app.id).execute(c).await?;
         Ok(())
     }
+    pub async fn tauri_settings(&self, id: &str) -> Result<(Option<String>, bool)> {
+        sqlx::query_as("SELECT tauri_public_key, EXISTS(SELECT 1 FROM releases WHERE application_id=applications.id AND status='published') FROM applications WHERE id=?")
+            .bind(id).fetch_optional(&self.pool).await?.ok_or(ServiceError::NotFound)
+    }
+    pub async fn set_tauri_key(
+        c: &mut SqliteConnection,
+        id: &str,
+        key: Option<&str>,
+        now: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE applications SET tauri_public_key=?,updated_at=max(updated_at,?) WHERE id=?",
+        )
+        .bind(key)
+        .bind(now)
+        .bind(id)
+        .execute(c)
+        .await?;
+        Ok(())
+    }
     pub async fn icon_keys(&self) -> Result<Vec<String>> {
         Ok(
             sqlx::query_scalar("SELECT icon_key FROM applications WHERE icon_key IS NOT NULL")

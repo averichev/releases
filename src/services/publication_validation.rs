@@ -22,6 +22,19 @@ impl PublicationValidator {
         snapshot: &PublicationSnapshot,
         require_draft: bool,
     ) -> Result<PublicationValidation> {
+        self.check(snapshot, require_draft, true).await
+    }
+    /// Page inspection checks metadata without rehashing gigabytes. An explicit
+    /// integrity check and publication still use validate() above.
+    pub async fn inspect(&self, snapshot: &PublicationSnapshot) -> Result<PublicationValidation> {
+        self.check(snapshot, false, false).await
+    }
+    async fn check(
+        &self,
+        snapshot: &PublicationSnapshot,
+        require_draft: bool,
+        full_integrity: bool,
+    ) -> Result<PublicationValidation> {
         let mut warnings = Vec::new();
         let mut errors = Vec::new();
         let mut error = |code, message: &str| {
@@ -77,11 +90,17 @@ impl PublicationValidator {
                     ),
                 ));
             }
-            match self
-                .storage
-                .verify(&artifact.storage_key, artifact.size_bytes, &artifact.sha256)
-                .await
-            {
+            let integrity = if full_integrity {
+                self.storage
+                    .verify(&artifact.storage_key, artifact.size_bytes, &artifact.sha256)
+                    .await
+            } else {
+                self.storage
+                    .open(&artifact.storage_key, artifact.size_bytes)
+                    .await
+                    .map(|_| true)
+            };
+            match integrity {
                 Ok(true) => (),
                 Ok(false) => errors.push(issue(
                     "checksum_mismatch",

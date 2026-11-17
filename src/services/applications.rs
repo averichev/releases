@@ -165,6 +165,17 @@ impl ApplicationCatalog {
         tx.commit().await?;
         Ok(())
     }
+    pub async fn set_tauri_key(&self, actor: &Identity, id: &str, key: Option<&str>) -> Result<()> {
+        let key = key
+            .map(|v| crate::domain::tauri::public_key(v).ok_or(ServiceError::InvalidUpdater))
+            .transpose()?;
+        let mut tx = self.repository.write().await?;
+        Self::authorize(&mut tx, actor).await?;
+        ApplicationsRepository::get_in(&mut tx, id).await?;
+        ApplicationsRepository::set_tauri_key(&mut tx, id, key.as_deref(), secrets::now()).await?;
+        tx.commit().await?;
+        Ok(())
+    }
     pub async fn icon(&self, id: &str) -> Result<Vec<u8>> {
         let app = self.get(id).await?;
         let key = app.icon_key.ok_or(ServiceError::NotFound)?;

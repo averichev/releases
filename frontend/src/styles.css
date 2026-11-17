@@ -180,3 +180,27 @@ a { color: #236b54; }
 .public-footer { text-align: center; color: #687570; }
 .distribution-url { overflow-wrap: anywhere; }
 @media (max-width: 600px) { .public-content { width: calc(100% - 32px); margin: 28px auto; gap: 20px; } .public-hero { gap: 16px; flex-direction: column; } .public-selectors { grid-template-columns: 1fr; gap: 16px; } .public-header { padding: 0 16px; } .public-content .ant-card-head { flex-wrap: wrap; } }
+
+.tauri-wizard { display: grid; grid-template-columns: 255px minmax(0, 1fr); gap: 24px; align-items: start; }
+.tauri-step-content, .tauri-step-navigation, .tauri-integration, .tauri-integration .ant-space-item { min-width: 0; }
+.tauri-step-content .ant-card-head-title { white-space: normal; padding-block: 16px; }
+.tauri-step-buttons { margin-top: 28px; }
+.tauri-diagnostic-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.integration-code { border: 1px solid var(--ant-color-border-secondary, #e7ebe8); border-radius: 8px; overflow: hidden; width: 100%; margin-block: 10px; }
+.integration-code-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--ant-color-fill-quaternary, #f7f9f8); font-size: 12px; }
+.integration-code pre { margin: 0; padding: 16px; overflow: auto; max-height: 540px; font-size: 12px; line-height: 1.7; tab-size: 4; background: var(--ant-color-bg-container, #fff); }
+.integration-code .hljs-keyword, .integration-code .hljs-literal { color: #8b38a1; }
+.integration-code .hljs-string, .integration-code .hljs-attr { color: #16704c; }
+.integration-code .hljs-title, .integration-code .hljs-built_in, .integration-code .hljs-type { color: #205cb1; }
+.integration-code .hljs-number { color: #a95217; }
+.integration-code .hljs-comment { color: #697870; }
+@media (max-width: 1100px) { .tauri-wizard { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .tauri-diagnostic-fields { grid-template-columns: 1fr; }
+  .tauri-integration > .ant-space-item > .ant-card > .ant-card-head .ant-card-head-wrapper { flex-wrap: wrap; padding-block: 12px; gap: 8px; }
+  .tauri-step-content .ant-card-body, .tauri-step-navigation .ant-card-body { padding: 18px; }
+}
+@media (max-width: 600px) {
+  .tauri-integration .ant-descriptions-item-container { flex-direction: column; gap: 4px; }
+  .tauri-integration .ant-descriptions-item-label::after { display: none; }
+}

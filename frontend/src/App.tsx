@@ -81,7 +81,7 @@ export function AppRoutes() {
       <Route path="applications" element={<Suspense fallback={<Spin />}><Applications /></Suspense>} />
       <Route path="applications/new" element={<Suspense fallback={<Spin />}><ApplicationCreate /></Suspense>} />
       <Route path="applications/:id/releases/:releaseId" element={<Suspense fallback={<Spin />}><ReleaseDetail /></Suspense>} />
-      {['applications/:id', 'applications/:id/settings', 'applications/:id/releases', 'applications/:id/channels', 'applications/:id/manifests', 'applications/:id/history', 'applications/:id/distribution'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
+      {['applications/:id', 'applications/:id/settings', 'applications/:id/releases', 'applications/:id/channels', 'applications/:id/manifests', 'applications/:id/history', 'applications/:id/distribution', 'applications/:id/integrations/tauri'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
       {sections.filter((s) => s.path !== 'users' && s.path !== 'applications').map((section) => <Route key={section.path} path={section.path} element={<Placeholder title={section.title} description={section.description} />} />)}
       <Route path="*" element={<Result status="404" title="Страница не найдена" extra={<Link to="/admin">Вернуться к обзору</Link>} />} />
     </Route>

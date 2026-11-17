@@ -908,3 +908,508 @@ async fn sparse_file_over_two_gib_streams_and_reports_u64_metadata() {
     assert_eq!(last.status(), 206);
     assert_eq!(bytes(last).await, vec![0]);
 }
+
+fn public_key() -> String {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let mut packet = [0u8; 42];
+    packet[..2].copy_from_slice(b"Ed");
+    STANDARD.encode(format!(
+        "untrusted comment: integration test public key\n{}\n",
+        STANDARD.encode(packet)
+    ))
+}
+#[test]
+fn tauri_configuration_preserves_tokens_and_serializes_values_safely() {
+    use veruna_releases::services::tauri_integration::{configuration, endpoint};
+    let stable = endpoint("https://updates.example.test/", "product-one", "stable").unwrap();
+    assert_eq!(
+        stable,
+        "https://updates.example.test/api/v1/updates/tauri/product-one/stable/{{target}}/{{arch}}/{{current_version}}"
+    );
+    let beta = endpoint("https://another.example.test", "second-app", "beta").unwrap();
+    assert!(beta.starts_with("https://another.example.test/api/v1/updates/tauri/second-app/beta/"));
+    let key = "quoted\"key\nwith\\escapes";
+    let value: Value = serde_json::from_str(&configuration(key, &stable).to_string()).unwrap();
+    assert_eq!(value["plugins"]["updater"]["pubkey"], key);
+    assert_eq!(value["plugins"]["updater"]["endpoints"][0], stable);
+    assert_eq!(value["bundle"]["createUpdaterArtifacts"], true);
+    for base in [
+        "https://evil.test/path",
+        "https://user:password@example.test",
+        "https://example.test?x=1",
+        "file:///tmp",
+    ] {
+        assert!(endpoint(base, "product", "stable").is_err());
+    }
+    assert!(endpoint("https://example.test", "../bad", "stable").is_err());
+    assert!(endpoint("https://example.test", "product", "nightly").is_err());
+}
+#[tokio::test]
+async fn tauri_settings_key_persistence_validation_access_and_revoked_session() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let path = format!("/api/v1/admin/applications/{}/integrations/tauri", t.app);
+    assert_eq!(
+        t.admin("GET", &path, Value::Null, None, false)
+            .await
+            .status(),
+        401
+    );
+    let initial = json_body(
+        t.admin("GET", &path, Value::Null, Some(&t.token), false)
+            .await,
+    )
+    .await;
+    assert!(initial["public_key"].is_null());
+    assert!(initial["configuration"].is_null());
+    assert_eq!(initial["ready"], false);
+    let codes: Vec<_> = initial["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["code"].as_str().unwrap())
+        .collect();
+    for code in [
+        "public_key_missing",
+        "published_release_missing",
+        "channel_release_missing",
+    ] {
+        assert!(codes.contains(&code));
+    }
+    t.state
+        .users
+        .create(
+            &t.actor,
+            "operator",
+            Role::Operator,
+            Some("test-password-123".into()),
+        )
+        .await
+        .unwrap();
+    let operator = t
+        .state
+        .authentication
+        .login("operator", "test-password-123".into(), None)
+        .await
+        .unwrap()
+        .token;
+    assert_eq!(
+        t.admin("GET", &path, Value::Null, Some(&operator), false)
+            .await
+            .status(),
+        200
+    );
+    for (token, csrf, status) in [
+        (None, true, 401),
+        (Some(operator.as_str()), true, 403),
+        (Some(t.token.as_str()), false, 403),
+    ] {
+        assert_eq!(
+            t.admin(
+                "PUT",
+                &path,
+                json!({"public_key":public_key()}),
+                token,
+                csrf
+            )
+            .await
+            .status(),
+            status
+        );
+    }
+    for key in [
+        "PRIVATE KEY".to_owned(),
+        STANDARD.encode(format!(
+            "untrusted comment: private key\n{}\n",
+            STANDARD.encode([0; 158])
+        )),
+        "x".repeat(4097),
+    ] {
+        assert_eq!(
+            t.admin(
+                "PUT",
+                &path,
+                json!({"public_key":key}),
+                Some(&t.token),
+                true
+            )
+            .await
+            .status(),
+            422
+        );
+    }
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &path,
+            json!({"public_key":public_key(), "private_key":"never accepted"}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        400
+    );
+    let key = public_key();
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &path,
+            json!({"public_key":format!("  {key}\n")}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        204
+    );
+    // A newly composed application state reads the durable setting, not a cache.
+    let restarted = application_state(t.state.database.clone(), &t.config)
+        .await
+        .unwrap();
+    let d = restarted
+        .tauri_integration
+        .details(&t.app, "beta", false)
+        .await
+        .unwrap();
+    assert_eq!(d.public_key.as_deref(), Some(key.as_str()));
+    assert!(
+        d.endpoint
+            .contains("https://apps.example.test/api/v1/updates/tauri/product/beta/{{target}}")
+    );
+    assert_eq!(
+        d.configuration.unwrap()["plugins"]["updater"]["pubkey"],
+        key
+    );
+    assert_eq!(
+        t.admin(
+            "GET",
+            &format!("{path}?channel=bad"),
+            Value::Null,
+            Some(&t.token),
+            false
+        )
+        .await
+        .status(),
+        400
+    );
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &path,
+            json!({"public_key":null}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        204
+    );
+    assert!(
+        t.state
+            .tauri_integration
+            .details(&t.app, "stable", false)
+            .await
+            .unwrap()
+            .public_key
+            .is_none()
+    );
+    t.state.sessions.logout(&t.actor).await.unwrap();
+    assert!(matches!(
+        t.state
+            .applications
+            .set_tauri_key(&t.actor, &t.app, Some(&key))
+            .await,
+        Err(veruna_releases::services::error::ServiceError::Unauthorized)
+    ));
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &path,
+            json!({"public_key":key}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        401
+    );
+}
+#[tokio::test]
+async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    t.state
+        .applications
+        .set_tauri_key(&t.actor, &t.app, Some(&public_key()))
+        .await
+        .unwrap();
+    let r = t.create("1.0.1").await;
+    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.state
+        .artifacts
+        .set_updater(&t.actor, &t.app, &r.id, &a.id, Some("updater"), None)
+        .await
+        .unwrap();
+    t.publish(&r, "stable").await;
+    let d = t
+        .state
+        .tauri_integration
+        .details(&t.app, "stable", false)
+        .await
+        .unwrap();
+    assert!(d.blockers.iter().any(|i| i.code == "signature_missing"));
+    assert!(!d.packages[0].signature_present);
+    let preview = t
+        .state
+        .updater
+        .preview(&t.app, "stable", "windows-x86_64", "1.0.0")
+        .await
+        .unwrap();
+    assert_eq!(preview.reason, "signature_missing");
+    assert_eq!(preview.state, "blocked");
+    // Published files cannot be repaired: publish a new signed release instead.
+    let signed = t.create("1.0.2").await;
+    let signed_file = t.upload(&signed, "windows-x86_64", "setup.exe").await;
+    t.state
+        .artifacts
+        .set_updater(
+            &t.actor,
+            &t.app,
+            &signed.id,
+            &signed_file.id,
+            Some("updater"),
+            Some(Some(signature().as_bytes())),
+        )
+        .await
+        .unwrap();
+    t.publish(&signed, "beta").await;
+    let path = format!("/api/v1/admin/applications/{}/integrations/tauri", t.app);
+    let details = json_body(
+        t.admin(
+            "POST",
+            &format!("{path}/readiness?channel=beta"),
+            Value::Null,
+            Some(&t.token),
+            true,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(details["ready"], true);
+    assert_eq!(details["full_integrity_checked"], true);
+    assert_eq!(details["current_version"], "1.0.2");
+    assert_eq!(details["packages"][0]["signature_present"], true);
+    let preview_path = format!("/api/v1/admin/applications/{}/updater/tauri/preview", t.app);
+    let available = json_body(
+        t.admin(
+            "POST",
+            &preview_path,
+            json!({"channel":"beta","target":"windows-x86_64","current_version":"1.0.0"}),
+            Some(&t.token),
+            true,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(available["state"], "available");
+    assert_eq!(available["artifact_filename"], "setup.exe");
+    let actual = json_body(
+        t.get(
+            "GET",
+            "/api/v1/updates/tauri/product/beta/windows/x86_64/1.0.0",
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(available["response"], actual);
+    let absent = json_body(
+        t.admin(
+            "POST",
+            &preview_path,
+            json!({"channel":"beta","target":"windows-x86_64","current_version":"1.0.2"}),
+            Some(&t.token),
+            true,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(absent["reason"], "version_not_newer");
+    assert!(absent["response"].is_null());
+    let public = t
+        .get(
+            "GET",
+            "/api/v1/updates/tauri/product/beta/windows/x86_64/1.0.2",
+            &[],
+        )
+        .await;
+    assert_eq!(public.status(), 204);
+    assert!(bytes(public).await.is_empty());
+    let absent = t
+        .state
+        .updater
+        .preview(&t.app, "beta", "linux-aarch64", "1.0.0")
+        .await
+        .unwrap();
+    assert_eq!(absent.reason, "updater_package_missing");
+    assert!(
+        t.state
+            .updater
+            .preview(&t.app, "beta", "android-aarch64", "1.0.0")
+            .await
+            .is_err()
+    );
+    let stable = t
+        .state
+        .tauri_integration
+        .details(&t.app, "stable", false)
+        .await
+        .unwrap();
+    assert_eq!(stable.current_version.as_deref(), Some("1.0.1"));
+    tokio::fs::write(
+        t.config.storage.directory.join(&signed_file.storage_key),
+        b"XXXXXXXXXX",
+    )
+    .await
+    .unwrap();
+    let full = t
+        .state
+        .tauri_integration
+        .details(&t.app, "beta", true)
+        .await
+        .unwrap();
+    assert!(full.blockers.iter().any(|i| i.code == "checksum_mismatch"));
+    t.state
+        .applications
+        .update(
+            &t.actor,
+            &t.app,
+            ApplicationChanges {
+                visibility: Some(Visibility::Private),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        t.state
+            .tauri_integration
+            .details(&t.app, "beta", false)
+            .await
+            .unwrap()
+            .blockers
+            .iter()
+            .any(|i| i.code == "endpoint_unavailable")
+    );
+}
+#[tokio::test]
+async fn tauri_readiness_distinguishes_published_release_empty_channel_and_installer_only() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("1.0.1").await;
+    t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.publish(&r, "stable").await;
+    let stable = t
+        .state
+        .tauri_integration
+        .details(&t.app, "stable", false)
+        .await
+        .unwrap();
+    assert!(stable.published_release_exists);
+    assert!(
+        stable
+            .blockers
+            .iter()
+            .any(|i| i.code == "updater_package_missing")
+    );
+    let beta = t
+        .state
+        .tauri_integration
+        .details(&t.app, "beta", false)
+        .await
+        .unwrap();
+    assert!(beta.published_release_exists);
+    assert!(
+        beta.blockers
+            .iter()
+            .any(|i| i.code == "channel_release_missing")
+    );
+    assert!(
+        !beta
+            .blockers
+            .iter()
+            .any(|i| i.code == "published_release_missing")
+    );
+    let path = format!("/api/v1/admin/applications/{}/integrations/tauri", t.app);
+    let cookie = format!("veruna_session={}", t.token);
+    let settings = json_body(
+        t.get(
+            "GET",
+            &path,
+            &[
+                ("cookie", &cookie),
+                ("forwarded", "host=attacker.example;proto=http"),
+            ],
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        settings["endpoint"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://apps.example.test/")
+    );
+    assert_eq!(
+        t.admin(
+            "POST",
+            &format!("{path}/readiness"),
+            Value::Null,
+            None,
+            true
+        )
+        .await
+        .status(),
+        401
+    );
+    assert_eq!(
+        t.admin(
+            "POST",
+            &format!("{path}/readiness"),
+            Value::Null,
+            Some(&t.token),
+            false
+        )
+        .await
+        .status(),
+        403
+    );
+    t.state
+        .users
+        .create(
+            &t.actor,
+            "reader",
+            Role::Operator,
+            Some("test-password-123".into()),
+        )
+        .await
+        .unwrap();
+    let reader = t
+        .state
+        .authentication
+        .login("reader", "test-password-123".into(), None)
+        .await
+        .unwrap()
+        .token;
+    assert_eq!(
+        t.admin(
+            "POST",
+            &format!("{path}/readiness"),
+            Value::Null,
+            Some(&reader),
+            true
+        )
+        .await
+        .status(),
+        200
+    );
+}

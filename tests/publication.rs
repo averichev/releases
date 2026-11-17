@@ -1070,7 +1070,7 @@ async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {
             format!("{}/manifests/stable/preview", t.base()),
             false,
         ),
-        ("POST", format!("{}/updater/tauri/preview", t.base()), false),
+        ("POST", format!("{}/updater/tauri/preview", t.base()), true),
         ("PUT", format!("{}/updater", t.artifact_path(&r, &a)), false),
         (
             "PUT",
@@ -1091,9 +1091,19 @@ async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {
             "{method} {path}"
         );
         assert_eq!(
-            t.request(method, &path, Body::from("{}"), Some(&operator), true)
-                .await
-                .status(),
+            t.request(
+                method,
+                &path,
+                Body::from(if path.ends_with("/updater/tauri/preview") {
+                    r#"{"channel":"stable","target":"windows-x86_64","current_version":"1.0.0"}"#
+                } else {
+                    "{}"
+                }),
+                Some(&operator),
+                true
+            )
+            .await
+            .status(),
             if readable { 200 } else { 403 },
             "{method} {path}"
         );

@@ -72,7 +72,7 @@ GET иконки защищён той же сессией и доступен �
 
 ## Публикации и обновления (этап 5)
 
-Базовый путь для таблицы — `/api/v1/admin/applications/{applicationId}`. Все запросы требуют живую session cookie. Каналы/историю читают admin/operator; validation, оба preview, публикацию, переключение и updater metadata — только admin. Все POST/PUT/DELETE проходят существующие Origin/custom-header/CSRF проверки, изменения повторно проверяют session/admin в write-транзакции.
+Базовый путь для таблицы — `/api/v1/admin/applications/{applicationId}`. Все запросы требуют живую session cookie. Каналы/историю и Tauri preview читают admin/operator; validation публикации, preview универсального манифеста, публикацию, переключение и updater metadata — только admin. Все POST/PUT/DELETE проходят существующие Origin/custom-header/CSRF проверки, изменения повторно проверяют session/admin в write-транзакции.
 
 | Метод | Суффикс | Тело / результат |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ History DTO: `id,application_id,release_id,channel,action,previous_release_id,pr
 
 Подпись можно прикрепить только draft artifact с ролью updater; повторный PUT заменяет её, DELETE очищает. Переключение роли на installer удаляет подпись. При несовместимых target/format, неверной структуре подписи, пути/URL/key-файле — 422 `invalid_updater`. Превышение сырого тела — 413. Проверка структуры `.sig` не заменяет криптографическую проверку клиентом. Все metadata/подписи опубликованного файла защищены 409 `release_locked`.
 
-TauriPreview: `state,reason,message,selected_version,artifact_id,signature_present,public_downloads_available,response`. При успешном выборе подписанного публичного пакета reason=update_available, state=available, response содержит Tauri JSON и public_downloads_available=true. При той же/старшей версии клиента — version_not_newer. Другие причины и модель описаны в [управлении релизами](release-management.md). Этот административный endpoint не является production updater; он не отдаёт протокольный 204/200 и не публикуется клиентам.
+TauriPreview: `state,reason,message,selected_version,artifact_id,artifact_filename,signature_present,public_downloads_available,response`. При успешном выборе подписанного публичного пакета reason=update_available, state=available, response содержит Tauri JSON и public_downloads_available=true. При той же/старшей версии клиента — version_not_newer. Другие причины и модель описаны в [управлении релизами](release-management.md). Этот административный endpoint не является production updater; он не отдаёт протокольный 204/200 и не публикуется клиентам.
 
 Все административные ответы — no-store. Некорректные JSON/unknown fields/query — 400, неверный SemVer — 422, несуществующие ресурсы — 404, middleware gates — 401/403. Новые JSON/подписи ограничены 16 КиБ; входные имена/версии дополнительно ограничены доменными правилами. При 422 publication_blocked клиент показывает validation из ответа. Полный публичный контракт `GET /{slug}/manifest.json`, ETag и 404 для private/archived описаны в [release-management.md](release-management.md#универсальный-манифест).
 
@@ -121,3 +121,7 @@ TauriPreview: `state,reason,message,selected_version,artifact_id,signature_prese
 | GET | `/distribution/releases/{releaseId}` | admin/operator: public_available, files[{id,url,tauri_compatible,signature_present}], warnings[] |
 
 Селектор валидируется доменом, сессия/роль перепроверяются внутри write transaction. Неизвестные поля — 400, неверный target/format/purpose — 422, session/CSRF/role — 401/403. Селектор не связан с изменением опубликованных файлов; неизвестный UUID/чужой release — 404. default_distribution_missing появляется как warning при проверке публикации. Публичные ссылки private/archived показываются как настройки с предупреждением о недоступности; private preview манифеста не включает download_url. Public API и HTTP Range: [public-distribution.md](public-distribution.md). Updater: [integrations/tauri.md](integrations/tauri.md).
+
+## Настройка Tauri-интеграции
+
+Описание GET/PUT `/applications/{id}/integrations/tauri`, явного POST `/readiness`, полей, прав и примеров: [Tauri — административный API](integrations/tauri.md#статусы-и-административный-api). Префикс `/api/v1/admin` и session/CSRF сохраняются. Оператор может читать настройки и вызывать read-only preview; изменение публичного ключа требует admin с повторной проверкой сессии в транзакции. Публичные ключи не секретны; приватные ключи и пароли не принимаются.

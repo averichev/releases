@@ -19,3 +19,5 @@ pub mod manifest;
 pub mod updater;
 
 pub mod distribution;
+
+pub mod tauri_integration;

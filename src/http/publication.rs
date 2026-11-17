@@ -34,7 +34,6 @@ pub fn router() -> Router<AppState> {
             &format!("{APP}/manifests/{{channel}}/preview"),
             get(manifest_preview),
         )
-        .route(&format!("{APP}/updater/tauri/preview"), post(tauri_preview))
         .route(
             &format!("{APP}/releases/{{release}}/artifacts/{{artifact}}/updater"),
             put(updater_role),
@@ -49,6 +48,7 @@ pub fn router() -> Router<AppState> {
         .layer(middleware::from_fn(auth::require_admin))
         .merge(
             Router::new()
+                .route(&format!("{APP}/updater/tauri/preview"), post(tauri_preview))
                 .route(&format!("{APP}/channels"), get(channels))
                 .route(&format!("{APP}/publication-history"), get(history)),
         )

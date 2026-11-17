@@ -38,3 +38,7 @@ ApiToken и DownloadEvent не создаются. Публичные download U
 ## Настройка распространения (этап 6)
 
 Миграция 0006 добавляет application_distribution: application_id PK/FK, target, format, purpose (CHECK installer). Отсутствующая строка означает автоматический выбор только при единственном installer. Значения проверяются доменом и DB CHECK по длине/назначению. Настройка изменяема независимо от published Release/Artifact; UUID/slug, membership, immutability и append-only история не меняются.
+
+## Публичный ключ Tauri
+
+Миграция `0007_tauri_integration.sql` добавляет `applications.tauri_public_key TEXT NULL` (1–4096 символов при наличии). Сервис принимает только публичный Tauri CLI/minisign envelope; `NULL` означает отсутствие настройки. Ключ используется для генерируемых инструкций, не для серверного подписания или объявления криптографического успеха. Существующие приложения после миграции получают `NULL`; подписи артефактов и инварианты публикации не изменены.

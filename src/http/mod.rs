@@ -9,6 +9,7 @@ mod error;
 mod health;
 mod publication;
 mod releases;
+mod tauri_integration;
 mod upload_body;
 
 use axum::{
@@ -34,6 +35,7 @@ pub struct AppState {
     pub distribution: crate::services::distribution::PublicDistribution,
     pub publishing: crate::services::publishing::ReleasePublishing,
     pub manifests: crate::services::manifest::ManifestGeneration,
+    pub tauri_integration: crate::services::tauri_integration::TauriIntegration,
     pub updater: crate::services::updater::TauriUpdater,
     pub storage_config: crate::config::StorageConfig,
     pub releases: crate::services::release::ReleaseManagement,

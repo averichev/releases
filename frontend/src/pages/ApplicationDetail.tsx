@@ -8,6 +8,7 @@ import Releases from './Releases';
 import Channels from './Channels';
 import Distribution from './Distribution';
 import Manifests from './Manifests';
+import TauriIntegration from './TauriIntegration';
 import PublicationHistory from './PublicationHistory';
 import ApplicationForm, { ApplicationIcon, ApplicationTags, IconPicker } from './ApplicationForm';
 
@@ -50,7 +51,7 @@ export default function ApplicationDetail() {
   const { id = '' } = useParams(); const { state } = useAuth(); const location = useLocation(); const navigate = useNavigate();
   const [application, setApplication] = useState<Application>(); const [error, setError] = useState(''); const [missing, setMissing] = useState(false); const [attempt, setAttempt] = useState(0);
   const administrator = state.kind === 'ready' && state.user.role === 'admin';
-  const tab = ['settings', 'releases', 'channels', 'manifests', 'history', 'distribution'].find((key) => location.pathname.endsWith(`/${key}`)) ?? 'overview';
+  const tab = location.pathname.endsWith('/integrations/tauri') ? 'integrations/tauri' : ['settings', 'releases', 'channels', 'manifests', 'history', 'distribution'].find((key) => location.pathname.endsWith(`/${key}`)) ?? 'overview';
   const base = `/admin/applications/${encodeURIComponent(id)}`;
   useEffect(() => {
     const controller = new AbortController(); setError(''); setMissing(false); setApplication(undefined);
@@ -68,6 +69,7 @@ export default function ApplicationDetail() {
     {application.status === 'archived' && <Alert className="archive-notice" type="warning" showIcon title="Приложение в архиве" description="Публичность сохранена как настройка. Архивный статус сохраняется до восстановления администратором." />}
     <Tabs activeKey={tab} onChange={(key) => navigate(key === 'overview' ? base : `${base}/${key}`)} items={[
       { key: 'overview', label: <Link to={base}>Обзор</Link> }, { key: 'releases', label: <Link to={`${base}/releases`}>Релизы</Link> },
+      { key: 'integrations/tauri', label: <Link to={`${base}/integrations/tauri`}>Интеграции</Link> },
       { key: 'distribution', label: <Link to={`${base}/distribution`}>Распространение</Link> },
       { key: 'channels', label: <Link to={`${base}/channels`}>Каналы обновлений</Link> }, { key: 'history', label: <Link to={`${base}/history`}>История</Link> },
       ...(administrator ? [{ key: 'manifests', label: <Link to={`${base}/manifests`}>Манифесты</Link> }, { key: 'settings', label: <Link to={`${base}/settings`}>Настройки</Link> }] : []),
@@ -80,6 +82,7 @@ export default function ApplicationDetail() {
       ]} />
     </Card>}
     {tab === 'releases' && <Releases application={application} administrator={administrator} />}
+    {tab === 'integrations/tauri' && <TauriIntegration application={application} administrator={administrator} />}
     {tab === 'distribution' && <Distribution application={application} administrator={administrator} />}
     {tab === 'channels' && <Channels application={application} administrator={administrator} />}
     {tab === 'history' && <PublicationHistory app={id} />}

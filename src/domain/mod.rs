@@ -6,3 +6,5 @@ pub mod artifact;
 pub mod release;
 
 pub mod publication;
+
+pub mod tauri;
