@@ -25,7 +25,7 @@ cargo run --locked
 
 Bootstrap запрашивает логин и пароль с подтверждением; пароль не отображается. Логин: 3–64 ASCII-символа `a-z`, `0-9`, `.`, `_`, `-`, без различия регистра. Пароль: 12–128 Unicode-символов (до 512 байт). Администратор создаётся активным. Если в БД уже есть администратор, команда ничего не меняет и не читает пароль. Команда не запускает HTTP-сервер и не требует доступа к каталогу дистрибутивов.
 
-Открыть [вход](http://127.0.0.1:8080/admin/login) и использовать созданную учётную запись. Проверить сервер:
+При обычном локальном запуске приложение само открывает `/admin` в браузере по умолчанию. Без сессии появится страница входа; используйте созданную учётную запись. По умолчанию сервер занимает `127.0.0.1:8080`. Если порт занят, ОС выделяет свободный порт; фактический адрес выводится в консоль и используется для браузера, авторизации и ссылок скачивания. Проверить сервер (подставьте выбранный порт, если 8080 был занят):
 
 ```sh
 curl --fail http://127.0.0.1:8080/api/v1/health
@@ -39,7 +39,7 @@ curl --fail http://127.0.0.1:8080/api/v1/health
 
 Если база недоступна — `503` и `{"error":{"code":"database_unavailable","message":"Service is not ready"}}`. Это проверка готовности HTTP/БД, а не полный аудит диска или внешних зависимостей.
 
-При первом запуске автоматически создаются `data/veruna.sqlite`, родительские каталоги и `data/artifacts`, а также отдельный каталог `data/icons`. Миграции применяются до открытия HTTP-порта. Ошибки конфигурации, миграций, файловой системы или привязки порта завершают процесс с ненулевым кодом.
+При первом запуске автоматически создаются `data/veruna.sqlite`, родительские каталоги и `data/artifacts`, а также отдельный каталог `data/icons`. Миграции применяются до открытия HTTP-порта. Ошибки конфигурации, миграций, файловой системы или привязки порта завершают процесс с ненулевым кодом. Ошибка открытия браузера оставляет сервер работающим: адрес можно открыть вручную. Команды `admin bootstrap` и `admin reset-password` браузер не открывают.
 
 ## Разработка
 
@@ -78,6 +78,8 @@ VERUNA_CONFIG=/etc/veruna/releases.toml ./target/release/veruna-releases
 | TOML | Переменная | По умолчанию |
 | --- | --- | --- |
 | `server.bind` | `VERUNA__SERVER__BIND` | `127.0.0.1:8080` |
+| `server.auto_port` | `VERUNA__SERVER__AUTO_PORT` | `true` |
+| `server.open_browser` | `VERUNA__SERVER__OPEN_BROWSER` | `true` |
 | `server.shutdown_timeout_seconds` | `VERUNA__SERVER__SHUTDOWN_TIMEOUT_SECONDS` | `15` |
 | `database.path` | `VERUNA__DATABASE__PATH` | `data/veruna.sqlite` |
 | `database.max_connections` | `VERUNA__DATABASE__MAX_CONNECTIONS` | `4` |
@@ -98,21 +100,25 @@ VERUNA_CONFIG=/etc/veruna/releases.toml ./target/release/veruna-releases
 
 `server.bind` — IP и порт, например `127.0.0.1:8080`, `0.0.0.0:8080` или `[::1]:8080`. Размер пула — 1–32, таймауты — 1–300 секунд. Логи JSON выводятся в stdout; HTTP-логи содержат метод, шаблон маршрута, статус и длительность; адреса, query string, тела и заголовки с секретами не логируются. Фильтр настраивается через TOML или `VERUNA__LOGGING__FILTER`; `RUST_LOG` не используется.
 
+Автовыбор порта работает только для loopback IP, когда `auth.public_origin` и `download.public_base_url` равны `http://<server.bind>`. При занятом порте listener сразу привязывается к свободному порту без отдельной проверки с освобождением сокета; оба локальных origin обновляются до создания HTTP-состояния. `server.auto_port = false` оставляет порт фиксированным. Внешние origin (включая Vite), привязка к `0.0.0.0`/`[::]` и HTTPS сохраняют настроенный порт, чтобы не нарушить proxy и постоянные URL.
+
+Браузер открывается только при `server.open_browser = true`, loopback-привязке и совпадении `auth.public_origin` с фактическим HTTP-адресом. Используются системные `open` на macOS, `rundll32.exe` на Windows и `xdg-open` на Linux. Для запуска без рабочего стола задайте `server.open_browser = false` или `VERUNA__SERVER__OPEN_BROWSER=false`. При отдельном Vite origin браузер автоматически не открывается.
+
 ## Production
 
 ### Релиз для Linux, Windows и macOS
 
-На macOS с Xcode Command Line Tools команда собирает UI один раз, затем три release-бинарника со встроенными assets и миграциями:
+На macOS с Xcode Command Line Tools команда собирает UI один раз, затем три release-бинарника со встроенными assets и миграциями, без архивов:
 
 ```sh
 make release
 ```
 
-| Платформа | Rust target | Архив |
+| Платформа | Rust target | Файл (версия из Cargo.toml) |
 | --- | --- | --- |
-| Linux x86_64 | `x86_64-unknown-linux-musl` | `.tar.gz` |
-| Windows x86_64 | `x86_64-pc-windows-gnu` | `.zip` |
-| macOS Apple Silicon | `aarch64-apple-darwin` | `.tar.gz` |
+| Linux x86_64 | `x86_64-unknown-linux-musl` | `veruna-releases-<version>-linux-x86_64` |
+| Windows x86_64 | `x86_64-pc-windows-gnu` | `veruna-releases-<version>-windows-x86_64.exe` |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `veruna-releases-<version>-macos-aarch64` |
 
 Однократная подготовка, помимо Node.js/npm и Rust через rustup:
 
@@ -127,17 +133,19 @@ rustup target add --toolchain stable aarch64-apple-darwin x86_64-unknown-linux-m
 
 Для линковки Zig скрипт поднимает мягкий лимит открытых файлов до 8192, если текущий ниже, сохраняя жёсткий лимит и настройки родительского терминала. Это предотвращает `ProcessFdQuotaExceeded` при сборке Linux musl со стандартным лимитом macOS в 256 файлов. Если жёсткий лимит не позволяет повышение, скрипт завершится до сборки с диагностикой.
 
-Результат: `dist/releases/<version>/veruna-releases-<version>-<platform>.<archive>` и `SHA256SUMS`; версия берётся из `Cargo.toml`. Архивы содержат только соответствующий бинарник. Например, для `0.1.0`:
+Результат: `dist/releases/<version>/veruna-releases-<version>-<platform>` (с `.exe` для Windows) и `SHA256SUMS`; версия берётся из `Cargo.toml`. Бинарники можно переносить и запускать отдельно. Например, для `0.1.0`:
 
 ```text
 dist/releases/0.1.0/
-  veruna-releases-0.1.0-linux-x86_64.tar.gz
-  veruna-releases-0.1.0-windows-x86_64.zip
-  veruna-releases-0.1.0-macos-aarch64.tar.gz
+  veruna-releases-0.1.0-linux-x86_64
+  veruna-releases-0.1.0-windows-x86_64.exe
+  veruna-releases-0.1.0-macos-aarch64
   SHA256SUMS
 ```
 
-Проверка архивов: `cd dist/releases/0.1.0 && shasum -a 256 -c SHA256SUMS`. Каталоги `dist/` и `target/` исключены из Git. Сборка не публикует файлы и не подписывает бинарники. Проверка запуска выполняется отдельно; локальный smoke на Apple Silicon: `python3 scripts/smoke.py target/aarch64-apple-darwin/release/veruna-releases`.
+Проверка файлов: `cd dist/releases/0.1.0 && shasum -a 256 -c SHA256SUMS`. Повторная сборка убирает старые архивы этих трёх платформ для той же версии после успешной замены бинарников. Каталоги `dist/` и `target/` исключены из Git. Сборка не публикует файлы и не подписывает бинарники. Проверка запуска выполняется отдельно; локальный smoke на Apple Silicon: `python3 scripts/smoke.py dist/releases/0.1.0/veruna-releases-0.1.0-macos-aarch64`.
+
+Для запуска по клику выберите файл своей ОС и архитектуры: `.exe` в Windows, `macos-aarch64` на Mac с Apple Silicon, `linux-x86_64` на Linux x86_64. После успешного старта откроется браузер. Unix-бинарники сохраняют право исполнения при сборке; если способ передачи снял его, выполните `chmod +x <файл>`. На Linux запуск по клику также зависит от настроек файлового менеджера; нужен рабочий стол с `xdg-open`. Бинарники не подписаны: системные правила запуска загруженных приложений продолжают действовать. Файл Linux нельзя запускать на macOS — это вызывает `exec format error`.
 
 ### Сборка для текущей системы
 

@@ -7,6 +7,8 @@ use veruna_releases::config::AppConfig;
 fn defaults_work_without_a_file() {
     let config = AppConfig::from_sources(None, HashMap::new()).unwrap();
     assert_eq!(config.server.bind.to_string(), "127.0.0.1:8080");
+    assert!(config.server.auto_port);
+    assert!(config.server.open_browser);
     assert_eq!(config.database.path.to_str(), Some("data/veruna.sqlite"));
 }
 
@@ -17,6 +19,8 @@ fn environment_overrides_file_and_preserves_other_values() {
     fs::write(&path, "[server]\nbind = '127.0.0.1:9090'\n[database]\npath = 'custom/db.sqlite'\nmax_connections = 2\n").unwrap();
     let environment = HashMap::from([
         ("VERUNA__SERVER__BIND".into(), "127.0.0.1:8181".into()),
+        ("VERUNA__SERVER__AUTO_PORT".into(), "false".into()),
+        ("VERUNA__SERVER__OPEN_BROWSER".into(), "false".into()),
         ("VERUNA__DATABASE__MAX_CONNECTIONS".into(), "3".into()),
         (
             "VERUNA_CONFIG".into(),
@@ -25,6 +29,8 @@ fn environment_overrides_file_and_preserves_other_values() {
     ]);
     let config = AppConfig::from_sources(Some(&path), environment).unwrap();
     assert_eq!(config.server.bind.port(), 8181);
+    assert!(!config.server.auto_port);
+    assert!(!config.server.open_browser);
     assert_eq!(config.database.max_connections, 3);
     assert_eq!(config.database.path.to_str(), Some("custom/db.sqlite"));
 }
@@ -33,6 +39,8 @@ fn environment_overrides_file_and_preserves_other_values() {
 fn invalid_or_misspelled_settings_fail_early() {
     for (key, value) in [
         ("VERUNA__SERVER__BIND", "invalid"),
+        ("VERUNA__SERVER__AUTO_PORT", "invalid"),
+        ("VERUNA__SERVER__OPEN_BROWSER", "invalid"),
         (
             "VERUNA__DOWNLOAD__PUBLIC_BASE_URL",
             "https://user:pass@evil.test",

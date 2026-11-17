@@ -32,6 +32,8 @@ def main():
         environment = {key: value for key, value in os.environ.items() if not key.startswith("VERUNA_")}
         environment.update({
             "VERUNA__SERVER__BIND": f"127.0.0.1:{port}",
+            "VERUNA__SERVER__OPEN_BROWSER": "false",
+            "VERUNA__SERVER__AUTO_PORT": "false",
             "VERUNA__AUTH__PUBLIC_ORIGIN": base,
             "VERUNA__DOWNLOAD__PUBLIC_BASE_URL": base,
             "VERUNA__DATABASE__PATH": str(root / "state/db/releases.sqlite"),

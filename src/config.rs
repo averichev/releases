@@ -48,6 +48,8 @@ impl Default for DownloadConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
     pub bind: SocketAddr,
+    pub auto_port: bool,
+    pub open_browser: bool,
     pub shutdown_timeout_seconds: u64,
 }
 
@@ -104,6 +106,8 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: ([127, 0, 0, 1], 8080).into(),
+            auto_port: true,
+            open_browser: true,
             shutdown_timeout_seconds: 15,
         }
     }

@@ -18,7 +18,7 @@ if [ "$open_files" != unlimited ] && [ "$open_files" -lt "$minimum_open_files" ]
     fail "Для линковки Zig нужен лимит открытых файлов не ниже $minimum_open_files (soft=$open_files, hard=$(ulimit -H -n)). Увеличьте hard limit в окружении запуска и повторите make release."
 fi
 
-for tool in npm rustup zig cargo-zigbuild xcrun x86_64-w64-mingw32-gcc x86_64-w64-mingw32-ar tar zip shasum; do
+for tool in npm rustup zig cargo-zigbuild xcrun x86_64-w64-mingw32-gcc x86_64-w64-mingw32-ar shasum; do
   command -v "$tool" >/dev/null 2>&1 || fail "Не найдена команда $tool. Установка зависимостей описана в README.md."
 done
 xcrun --sdk macosx --show-sdk-path >/dev/null
@@ -53,26 +53,25 @@ CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
   rustup run "$toolchain" cargo build --locked --release --bin veruna-releases \
     --target x86_64-pc-windows-gnu --target-dir target
 
-# Package only after every build succeeds; keep previous archives on failure.
+# Copy only after every build succeeds; keep previous binaries on failure.
 mkdir -p dist/releases
 staging=$(mktemp -d "$PWD/dist/releases/.release.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 trap 'exit 1' HUP INT TERM
 
 prefix=veruna-releases-$version
-# Exclude AppleDouble sidecars and extended attributes from macOS tar.
-COPYFILE_DISABLE=1 tar --no-xattrs -czf "$staging/$prefix-macos-aarch64.tar.gz" \
-  -C target/aarch64-apple-darwin/release veruna-releases
-COPYFILE_DISABLE=1 tar --no-xattrs -czf "$staging/$prefix-linux-x86_64.tar.gz" \
-  -C target/x86_64-unknown-linux-musl/release veruna-releases
-zip -q -j "$staging/$prefix-windows-x86_64.zip" \
-  target/x86_64-pc-windows-gnu/release/veruna-releases.exe
+cp target/aarch64-apple-darwin/release/veruna-releases "$staging/$prefix-macos-aarch64"
+cp target/x86_64-unknown-linux-musl/release/veruna-releases "$staging/$prefix-linux-x86_64"
+cp target/x86_64-pc-windows-gnu/release/veruna-releases.exe "$staging/$prefix-windows-x86_64.exe"
 (
   cd "$staging"
-  shasum -a 256 ./*.tar.gz ./*.zip > SHA256SUMS
+  shasum -a 256 "$prefix-macos-aarch64" "$prefix-linux-x86_64" "$prefix-windows-x86_64.exe" > SHA256SUMS
 )
 
 output=$PWD/dist/releases/$version
 mkdir -p "$output"
 mv "$staging/"* "$output/"
+# Remove only legacy archives generated for this same version.
+rm -f "$output/$prefix-macos-aarch64.tar.gz" \
+  "$output/$prefix-linux-x86_64.tar.gz" "$output/$prefix-windows-x86_64.zip"
 printf '\nРелиз %s собран: %s\n' "$version" "$output"
