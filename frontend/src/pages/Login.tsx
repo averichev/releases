@@ -4,6 +4,7 @@ import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth, SessionLoading } from '../auth/Auth';
 import { errorMessage } from '../api/client';
+import { Brand } from '../components/Brand';
 export default function Login() {
   const auth = useAuth(); const navigate = useNavigate(); const location = useLocation(); const { message } = App.useApp();
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
@@ -17,7 +18,7 @@ export default function Login() {
   }
   if (auth.state.kind === 'loading') return <SessionLoading />;
   return <main className="auth-page"><div className="auth-container">
-    <div className="auth-brand"><span className="brand-mark">v</span><div>Veruna <span>RELEASES</span></div></div>
+    <div className="auth-brand"><Brand /></div>
     <Card className="auth-card"><div className="eyebrow">ПАНЕЛЬ УПРАВЛЕНИЯ</div><Typography.Title level={1}>Вход в систему</Typography.Title>
       <Typography.Paragraph type="secondary">Управляйте доступом команды к платформе.</Typography.Paragraph>
       {auth.state.kind === 'ready' ? <><Alert type="success" title={`Вы вошли как ${auth.state.user.username}`} />

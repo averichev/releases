@@ -150,6 +150,26 @@ async fn embedded_ui_supports_nested_documents_assets_and_head() {
         assert_eq!(body(response).await, index);
     }
     let html = String::from_utf8(index.clone()).unwrap();
+    assert!(html.contains("<title>Релизы</title>"));
+    for (path, content_type) in [
+        ("/favicon.svg", "image/svg+xml"),
+        ("/favicon.ico", "image/x-icon"),
+        ("/apple-touch-icon.png", "image/png"),
+    ] {
+        let response = request(&router, Method::GET, path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(response.headers()["content-type"], content_type, "{path}");
+        assert_eq!(response.headers()["cache-control"], "no-cache", "{path}");
+        let contents = body(response).await;
+        assert!(!contents.is_empty(), "{path}");
+        let response = request(&router, Method::HEAD, path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response.headers()["content-length"],
+            contents.len().to_string()
+        );
+        assert!(body(response).await.is_empty(), "{path}");
+    }
     let script = html
         .split("src=\"")
         .nth(1)

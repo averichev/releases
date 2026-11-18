@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Релизы — иконка">
+  <title>Релизы — иконка</title>
+  <rect width="128" height="128" rx="0" fill="#FF7958" />
+  <g transform="translate(12 12) scale(0.8125)">
+    <path fill="#FFF4EC" d="M8 24H32L72 64L32 104H8L48 64Z" />
+    <path fill="#45261D" d="M56 24H80L120 64L80 104H56L96 64Z" />
+  </g>
+</svg>

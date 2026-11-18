@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Релизы — слои версий">
+  <rect data-color="primary" fill="#4658F5" x="12" y="88" width="76" height="24" rx="6"/>
+  <rect data-color="secondary" fill="#8A96FF" x="26" y="52" width="76" height="24" rx="6"/>
+  <path data-color="primary" fill="#4658F5" d="M46 16H102L116 30V34Q116 40 110 40H46Q40 40 40 34V22Q40 16 46 16Z"/>
+</svg>

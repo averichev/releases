@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Релизы — знак">
+  <title>Релизы — знак</title>
+  <g transform="translate(0 0) scale(1)">
+    <rect fill="#000000" x="12" y="88" width="76" height="24" rx="6" />
+    <rect fill="#000000" x="26" y="52" width="76" height="24" rx="6" />
+    <path fill="#000000" d="M46 16H102L116 30V34Q116 40 110 40H46Q40 40 40 34V22Q40 16 46 16Z" />
+  </g>
+</svg>

@@ -70,6 +70,8 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/", get(assets::serve))
         .route("/admin/{*path}", get(assets::panel))
         .route("/favicon.svg", get(assets::serve))
+        .route("/favicon.ico", get(assets::serve))
+        .route("/apple-touch-icon.png", get(assets::serve))
         .route("/index.html", get(assets::serve))
         .route("/{slug}/manifest.json", get(publication::public_manifest))
         .route("/api", any(not_found))

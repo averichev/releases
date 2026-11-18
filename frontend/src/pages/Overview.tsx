@@ -44,7 +44,7 @@ function HealthCard() {
 export default function Overview() {
   return (
     <>
-      <div className="page-heading"><div className="eyebrow">VERUNA RELEASES</div>
+      <div className="page-heading"><div className="eyebrow">РЕЛИЗЫ</div>
         <Title level={1}>Центр распространения</Title>
         <Paragraph>Единое место для приложений, релизов и доставки обновлений.</Paragraph>
       </div>

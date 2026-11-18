@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Form, Input, Result, Spin, Typography } from 'antd';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../api/client';
+import { Brand } from '../components/Brand';
 export const passwordRules = [{ required: true, message: 'Введите пароль' }, { min: 12, max: 128, message: 'От 12 до 128 символов' }];
 export function ConfirmPassword({ field = 'password' }: { field?: string }) {
   return <Form.Item label="Подтвердите пароль" name="confirmation" dependencies={[field]} rules={[
@@ -28,16 +29,18 @@ export default function Activate() {
     } catch (error) { setError(errorMessage(error)); } finally { setBusy(false); }
   }
   const done = state.kind === 'done' || location.state?.done === true;
-  return <main className="auth-page"><Card className="auth-container auth-card">
+  return <main className="auth-page"><div className="auth-container">
+    <div className="auth-brand"><Brand /></div>
+    <Card className="auth-card">
     {done ? <Result status="success" title="Пароль установлен" subTitle="Теперь можно войти в свою учётную запись." extra={<Link to="/admin/login"><Button type="primary">Перейти ко входу</Button></Link>} /> :
       state.kind === 'loading' ? <Spin aria-label="Проверяем ссылку" /> : state.kind === 'error' ?
         <Result status="warning" title="Не удалось открыть ссылку" subTitle={state.message} extra={<Link to="/admin/login">Вернуться ко входу</Link>} /> : state.kind === 'ready' ? <>
-          <div className="eyebrow">VERUNA RELEASES</div><Typography.Title level={1}>{state.purpose === 'reset' ? 'Новый пароль' : 'Активация доступа'}</Typography.Title>
+          <div className="eyebrow">ПАНЕЛЬ УПРАВЛЕНИЯ</div><Typography.Title level={1}>{state.purpose === 'reset' ? 'Новый пароль' : 'Активация доступа'}</Typography.Title>
           <Typography.Paragraph>Учётная запись: <strong>{state.username}</strong></Typography.Paragraph>
           <Form layout="vertical" onFinish={(values: { password: string }) => { void submit(values); }} requiredMark={false}>
             {error && <Alert className="form-alert" type="error" title={error} role="alert" />}
             <Form.Item label="Пароль" name="password" rules={passwordRules} extra="От 12 до 128 символов. Используйте уникальную парольную фразу."><Input.Password autoComplete="new-password" maxLength={128} /></Form.Item>
             <ConfirmPassword /><Button type="primary" block htmlType="submit" loading={busy}>Установить пароль</Button>
           </Form></> : null}
-  </Card></main>;
+  </Card></div></main>;
 }

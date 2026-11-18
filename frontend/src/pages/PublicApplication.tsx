@@ -4,6 +4,7 @@ import { DownloadOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, errorMessage } from '../api/client';
 import { size, targetName } from '../api/releases';
+import { Brand } from '../components/Brand';
 export interface PublicArtifact { id: string; filename: string; target: string; format: string; purpose: string; size_bytes: number; download_url: string }
 export interface PublicRelease { version: string; published_at: string; notes: string; artifacts: PublicArtifact[] }
 interface PublicApp { name: string; description: string; slug: string; icon_url: string | null; channel: string; latest: PublicRelease | null; default_artifact_id: string | null }
@@ -52,12 +53,12 @@ export default function PublicApplication() {
     api<History>(`${base}/releases?channel=${channel}&limit=10&offset=${(page - 1) * 10}`, 'GET', undefined, c.signal).then((v) => { if (!c.signal.aborted) setHistory(v); }, (e) => { if (!c.signal.aborted) setHistoryError(errorMessage(e)); });
     return () => c.abort();
   }, [base, channel, page, attempt]);
-  return <Layout className="public-layout"><Layout.Header className="public-header"><span className="brand-mark">v</span><Typography.Text strong>Veruna Releases</Typography.Text></Layout.Header><Layout.Content className="public-content">
+  return <Layout className="public-layout"><Layout.Header className="public-header"><Brand /></Layout.Header><Layout.Content className="public-content">
     {error ? <Result status={missing ? '404' : 'error'} title={missing ? 'Приложение не найдено' : 'Не удалось загрузить приложение'} subTitle={missing ? 'Проверьте адрес приложения.' : error} extra={!missing && <Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !app ? <div className="catalog-loading"><Spin aria-label="Загрузка приложения" /></div> : <>
-      <section className="public-hero"><Avatar shape="square" size={88} src={app.icon_url} icon={<AppstoreOutlined />} /><div><Typography.Text className="eyebrow">ПРИЛОЖЕНИЯ VERUNA</Typography.Text><Typography.Title level={1}>{app.name}</Typography.Title><Typography.Paragraph className="application-full-description">{app.description}</Typography.Paragraph><Space wrap><Tag color={channel === 'beta' ? 'orange' : 'green'}>{channel}</Tag>{app.latest && <><Tag>v{app.latest.version}</Tag><Typography.Text type="secondary">{releaseDate(app.latest.published_at)}</Typography.Text></>}</Space></div></section>
+      <section className="public-hero"><Avatar shape="square" size={88} src={app.icon_url} icon={<AppstoreOutlined />} /><div><Typography.Text className="eyebrow">РАСПРОСТРАНЕНИЕ ПРИЛОЖЕНИЙ</Typography.Text><Typography.Title level={1}>{app.name}</Typography.Title><Typography.Paragraph className="application-full-description">{app.description}</Typography.Paragraph><Space wrap><Tag color={channel === 'beta' ? 'orange' : 'green'}>{channel}</Tag>{app.latest && <><Tag>v{app.latest.version}</Tag><Typography.Text type="secondary">{releaseDate(app.latest.published_at)}</Typography.Text></>}</Space></div></section>
       <Download key={`${app.slug}-${app.latest?.version}-${app.default_artifact_id}`} app={app} />
       {app.latest && <Card title="Что нового"><Typography.Paragraph className="application-full-description">{app.latest.notes || 'Описание изменений не добавлено'}</Typography.Paragraph><Space wrap>{[...new Set(app.latest.artifacts.map((a) => a.target))].map((t) => <Tag key={t}>{targetName(t)}</Tag>)}</Space></Card>}
       <section><Typography.Title level={2}>История версий</Typography.Title>{historyError ? <Alert type="error" title="Не удалось загрузить историю" description={historyError} action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !history ? <Spin aria-label="Загрузка истории" /> : <><Space orientation="vertical" className="full-width">{history.items.length ? history.items.map((r) => <Card key={r.version} title={`Версия ${r.version}`} extra={<Typography.Text type="secondary">{releaseDate(r.published_at)}</Typography.Text>}><Typography.Paragraph className="application-full-description">{r.notes || 'Описание изменений не добавлено'}</Typography.Paragraph><Files release={r} /></Card>) : <Empty description="Опубликованных версий пока нет" />}</Space>{history.total > 10 && <Pagination current={page} pageSize={10} total={history.total} onChange={setPage} showSizeChanger={false} />}</>}</section>
     </>}
-  </Layout.Content><Layout.Footer className="public-footer">Veruna Releases · Распространение приложений</Layout.Footer></Layout>;
+  </Layout.Content><Layout.Footer className="public-footer"><Brand /><span>Распространение приложений</span></Layout.Footer></Layout>;
 }

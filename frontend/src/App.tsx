@@ -10,6 +10,7 @@ import { AuthProvider, RequireSession, useAuth } from './auth/Auth';
 import Login from './pages/Login';
 import Activate from './pages/Activate';
 import { sections } from './sections';
+import { Brand } from './components/Brand';
 
 const { Title, Paragraph } = Typography;
 const PublicApplication = lazy(() => import('./pages/PublicApplication'));
@@ -30,9 +31,8 @@ function AdminLayout() {
     <Layout className="app-layout">
       <Layout.Sider width={244} breakpoint="lg" collapsedWidth={0} className="sidebar" theme="light"
         trigger={<Button type="text" aria-label="Переключить навигацию" icon={<MenuOutlined />} />}>
-        <Link to="/admin" className="brand" aria-label="Veruna Releases — обзор">
-          <span className="brand-mark">v</span>
-          <span>Veruna<span className="brand-subtitle">RELEASES</span></span>
+        <Link to="/admin" className="brand" aria-label="Релизы — обзор">
+          <Brand />
         </Link>
         <div className="nav-label">РАСПРОСТРАНЕНИЕ ПО</div>
         <nav aria-label="Основная навигация">
@@ -51,7 +51,7 @@ function AdminLayout() {
           <Link to="/admin/profile"><Tag variant="filled"><UserOutlined /> {state.kind === 'ready' ? state.user.username : ''}</Tag></Link>
         </Layout.Header>
         <Layout.Content className="page-content"><Outlet /></Layout.Content>
-        <Layout.Footer className="footer"><span>Veruna Releases</span><span>Платформа распространения ПО</span></Layout.Footer>
+        <Layout.Footer className="footer"><Brand /><span>Платформа распространения ПО</span></Layout.Footer>
       </Layout>
     </Layout>
   );

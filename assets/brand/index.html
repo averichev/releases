@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Релизы — варианты логотипа</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18362c; background: #f2f3ef; font-synthesis: none; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; cursor: pointer; }
+    a { color: inherit; text-underline-offset: 3px; }
+    a:focus-visible, button:focus-visible { outline: 3px solid #4658f5; outline-offset: 4px; }
+    .wrap { max-width: 1560px; margin: auto; padding: 0 40px; }
+    header { border-bottom: 1px solid #d9ded5; }
+    header .wrap { display: flex; align-items: center; justify-content: space-between; min-height: 84px; gap: 24px; }
+    .header-logo { width: 122px; height: auto; }
+    .header-note { color: #69776c; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; }
+    .download { display: inline-flex; align-items: center; justify-content: center; border-radius: 100px; background: #193c30; color: white; padding: 13px 21px; text-decoration: none; font-size: 14px; white-space: nowrap; }
+    .intro { display: flex; align-items: end; justify-content: space-between; gap: 40px; padding: 58px 0 34px; }
+    .eyebrow { margin: 0 0 18px; font-size: 11px; font-weight: 650; letter-spacing: 2px; text-transform: uppercase; color: #6e7b70; }
+    h1 { margin: 0 0 14px; font-size: clamp(32px, 4vw, 52px); font-weight: 650; line-height: 1.08; letter-spacing: -1.8px; }
+    .intro p:last-child { margin: 0; color: #637168; max-width: 580px; font-size: 15px; line-height: 1.65; }
+    .badge { display: block; font-size: 12px; color: #637168; white-space: nowrap; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .themes { display: inline-flex; padding: 4px; gap: 3px; border: 1px solid #d9ded5; border-radius: 100px; }
+    .themes button { border: 0; background: transparent; border-radius: 100px; padding: 9px 17px; color: #647367; font-size: 13px; }
+    .themes button[aria-pressed="true"] { background: #fff; color: #193c30; box-shadow: 0 1px 4px #172e2314; }
+    .toolbar > span { font-size: 12px; color: #7a857c; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    article { min-width: 0; overflow: hidden; border: 1px solid #e0e4db; border-radius: 20px; background: #fff; }
+    .card-top { padding: 22px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    h2 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -.3px; }
+    h2 span { color: #9da69b; font-size: 12px; font-weight: 400; margin-right: 10px; }
+    .tag { font-size: 10px; padding: 5px 8px; border: 1px solid #d4e5b7; border-radius: 100px; color: #496a21; background: #f2f9e9; white-space: nowrap; }
+    .stage { margin: 0 12px; border: 1px solid #eef0ea; border-radius: 12px; height: 342px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 37px; background: #fbfcf8; transition: background .15s; }
+    .stage .symbol { width: 142px; height: 142px; }
+    .stage .name { width: 65%; max-width: 300px; height: auto; }
+    body[data-theme="dark"] .stage, body[data-theme="white"] .stage { background: #14231e; border-color: #14231e; }
+    body[data-theme="black"] .stage { background: white; }
+    .swatches { display: flex; gap: 7px; padding: 22px 24px 0; }
+    .swatch { width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 1px #00000008; }
+    .description { min-height: 62px; padding: 15px 24px 0; margin: 0; font-size: 13px; line-height: 1.65; color: #68776c; }
+    .icons { padding: 17px 24px 25px; display: flex; align-items: end; gap: 19px; height: 108px; }
+    .icon { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .icon span { font-size: 10px; color: #929d94; }
+    .card-links { border-top: 1px solid #eef0ea; padding: 17px 24px; display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+    .card-links a { text-decoration-color: #afbaae; }
+    .formats { margin-top: 40px; border: 1px solid #d9ded5; border-radius: 16px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 24px 0; }
+    .formats > div { padding: 0 28px; }
+    .formats > div + div { border-left: 1px solid #d9ded5; }
+    .formats strong { display: block; font-size: 14px; font-weight: 600; margin-bottom: 9px; }
+    .formats p { font-size: 12px; line-height: 1.7; color: #6b796e; margin: 0; }
+    footer { display: flex; justify-content: space-between; gap: 24px; padding: 28px 0 40px; font-size: 12px; color: #7d897e; }
+    @media (max-width: 1100px) { .wrap { padding: 0 24px; } .grid { gap: 14px; } .stage { height: 292px; gap: 28px; } .stage .symbol { width: 118px; height: 118px; } .card-top { padding: 20px 16px; } .tag { display: none; } .icons { gap: 13px; padding-left: 16px; padding-right: 16px; } .description, .card-links { padding-left: 16px; padding-right: 16px; } }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; gap: 22px; } .stage { height: 330px; } .stage .symbol { width: 142px; height: 142px; } .stage .name { width: 60%; max-width: 280px; } .tag { display: block; } .header-note, .badge { display: none; } .intro { padding-top: 36px; } .formats { grid-template-columns: 1fr; gap: 22px; } .formats > div + div { border: 0; } .icons { gap: 24px; } footer { flex-direction: column; gap: 12px; } }
+    @media (max-width: 390px) { .wrap { padding: 0 16px; } header .wrap { gap: 12px; } .header-logo { width: 100px; } .themes button { padding: 9px 8px; } .download { padding: 12px; font-size: 12px; } .icons { gap: 16px; } }
+  </style>
+</head>
+<body data-theme="color">
+  <header><div class="wrap">
+    <img class="header-logo" src="01-monogram/svg/wordmark-color.svg" alt="Релизы">
+    <span class="header-note">Варианты логотипа / 01—03</span>
+    <a class="download" href="relizy-brand-kit.zip" download>Скачать весь набор ↗</a>
+  </div></header>
+  <main class="wrap">
+    <div class="intro"><div>
+      <p class="eyebrow">Визуальный характер проекта</p>
+      <h1>Новый релиз. Новый знак.</h1>
+      <p>Три направления для «Релизов»: яркие цвета, простая геометрия и отдельные версии для любого масштаба.</p>
+    </div><span class="badge">Векторные исходники + готовые экспорты</span></div>
+    <div class="toolbar">
+      <div class="themes" role="group" aria-label="Оформление логотипов">
+        <button type="button" data-variant="color" aria-pressed="true">Светлый</button>
+        <button type="button" data-variant="dark" aria-pressed="false">Тёмный</button>
+        <button type="button" data-variant="black" aria-pressed="false">Чёрный</button>
+        <button type="button" data-variant="white" aria-pressed="false">Белый</button>
+      </div>
+      <span>Иконки показаны в реальном размере: 16 / 24 / 32 / 48 / 64 px</span>
+    </div>
+    <div class="grid">
+      <article data-concept="01-monogram">
+        <div class="card-top"><h2><span>01</span>Выход</h2><span class="tag">Применён</span></div>
+        <div class="stage"><img class="symbol" data-layout="mark" src="01-monogram/svg/mark-color.svg" alt="Монограмма Р с отделившимся элементом"><img class="name" data-layout="wordmark" src="01-monogram/svg/wordmark-color.svg" alt="Релизы"></div>
+        <div class="swatches" aria-label="Палитра"><span class="swatch" style="background:#173e35" title="#173E35"></span><span class="swatch" style="background:#c6fb50" title="#C6FB50"></span><span class="swatch" style="background:#95c928" title="#95C928"></span></div>
+        <p class="description">Буква «Р» и отделившийся элемент.<br>Связь с названием и моментом выпуска.</p>
+        <div class="icons" aria-label="Размеры иконки"></div>
+        <div class="card-links"><a class="svg-link" href="01-monogram/svg/horizontal-color.svg" download>SVG с названием ↗</a><a href="01-monogram.zip" download>Набор «Выход» ↓</a></div>
+      </article>
+      <article data-concept="02-layers">
+        <div class="card-top"><h2><span>02</span>Версии</h2></div>
+        <div class="stage"><img class="symbol" data-layout="mark" src="02-layers/svg/mark-color.svg" alt="Три слоя версий"><img class="name" data-layout="wordmark" src="02-layers/svg/wordmark-color.svg" alt="Релизы"></div>
+        <div class="swatches" aria-label="Палитра"><span class="swatch" style="background:#4658f5" title="#4658F5"></span><span class="swatch" style="background:#93a1ff" title="#93A1FF"></span><span class="swatch" style="background:#c6fb50" title="#C6FB50"></span></div>
+        <p class="description">Три слоя, каждый следующий — на шаг выше.<br>Последовательность версий и обновлений.</p>
+        <div class="icons" aria-label="Размеры иконки"></div>
+        <div class="card-links"><a class="svg-link" href="02-layers/svg/horizontal-color.svg" download>SVG с названием ↗</a><a href="02-layers.zip" download>Набор «Версии» ↓</a></div>
+      </article>
+      <article data-concept="03-forward">
+        <div class="card-top"><h2><span>03</span>Вперёд</h2></div>
+        <div class="stage"><img class="symbol" data-layout="mark" src="03-forward/svg/mark-color.svg" alt="Два шеврона вперёд"><img class="name" data-layout="wordmark" src="03-forward/svg/wordmark-color.svg" alt="Релизы"></div>
+        <div class="swatches" aria-label="Палитра"><span class="swatch" style="background:#ed5638" title="#ED5638"></span><span class="swatch" style="background:#ffb49c" title="#FFB49C"></span><span class="swatch" style="background:#45261d" title="#45261D"></span></div>
+        <p class="description">Два направленных шеврона.<br>Движение к следующему выпуску.</p>
+        <div class="icons" aria-label="Размеры иконки"></div>
+        <div class="card-links"><a class="svg-link" href="03-forward/svg/horizontal-color.svg" download>SVG с названием ↗</a><a href="03-forward.zip" download>Набор «Вперёд» ↓</a></div>
+      </article>
+    </div>
+    <div class="formats">
+      <div><strong>SVG — любой размер</strong><p>Знак, название, горизонтальная и вертикальная компоновки. Надпись в контурах, без зависимости от шрифта.</p></div>
+      <div><strong>PNG — 16–2048 px</strong><p>Прозрачные логотипы и иконки с подложкой. Отдельные Apple Touch и maskable-версии.</p></div>
+      <div><strong>Цвет + монохром</strong><p>Для светлого и тёмного фона, чёрный и белый варианты. Многоразмерный favicon.ico в каждом наборе.</p></div>
+    </div>
+    <footer><span>Релизы · варианты визуальной идентичности</span><a href="README.md">Размеры, исходники и правила применения ↗</a></footer>
+  </main>
+  <script>
+    for (const article of document.querySelectorAll('[data-concept]')) {
+      for (const size of [16, 24, 32, 48, 64]) {
+        const item = document.createElement('div'); item.className = 'icon';
+        const image = document.createElement('img');
+        image.src = `${article.dataset.concept}/png/icon-${size}.png`;
+        image.width = size; image.height = size; image.alt = `Иконка ${size} пикселей`;
+        const label = document.createElement('span'); label.textContent = size;
+        item.append(image, label); article.querySelector('.icons').append(item);
+      }
+    }
+    for (const button of document.querySelectorAll('[data-variant]')) {
+      button.addEventListener('click', () => {
+        const variant = button.dataset.variant;
+        document.body.dataset.theme = variant;
+        for (const item of document.querySelectorAll('[data-variant]')) item.setAttribute('aria-pressed', String(item === button));
+        for (const article of document.querySelectorAll('[data-concept]')) {
+          for (const image of article.querySelectorAll('[data-layout]')) image.src = `${article.dataset.concept}/svg/${image.dataset.layout}-${variant}.svg`;
+          article.querySelector('.svg-link').href = `${article.dataset.concept}/svg/horizontal-${variant}.svg`;
+        }
+      });
+    }
+  </script>
+</body>
+</html>
