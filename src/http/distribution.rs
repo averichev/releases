@@ -10,7 +10,7 @@ use crate::{
 use axum::{
     Extension, Json, Router,
     extract::{
-        Path, Query, State,
+        Path, Query,
         rejection::{JsonRejection, PathRejection, QueryRejection},
     },
     http::{HeaderMap, Method, StatusCode, header},
@@ -78,7 +78,7 @@ impl DownloadQuery {
     }
 }
 async fn latest(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<DownloadQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
@@ -103,7 +103,7 @@ async fn latest(
         .into_response())
 }
 async fn version(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 3]>, PathRejection>,
     query: Result<Query<DownloadQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
@@ -132,7 +132,7 @@ async fn version(
         .into_response())
 }
 async fn download(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 3]>, PathRejection>,
     query: Result<Query<DownloadQuery>, QueryRejection>,
     method: Method,
@@ -189,7 +189,7 @@ async fn release_dto(
     )
 }
 async fn application(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<CatalogQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
@@ -236,7 +236,7 @@ async fn application(
     ))
 }
 async fn history(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<CatalogQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
@@ -259,7 +259,7 @@ async fn history(
     ))
 }
 async fn page(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
     method: Method,
 ) -> Result<Response, ApiError> {
@@ -277,7 +277,7 @@ async fn page(
     }
 }
 async fn icon(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ApiError> {
     let Path(slug) = path.map_err(|_| ApiError::NotFound)?;
@@ -294,7 +294,7 @@ async fn icon(
         .into_response())
 }
 async fn tauri(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 5]>, PathRejection>,
 ) -> Result<Response, ApiError> {
     let Path([slug, channel, target, arch, version]) = path.map_err(|_| ApiError::BadRequest)?;
@@ -315,7 +315,7 @@ struct SelectorDto {
     purpose: String,
 }
 async fn set_default(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 1]>, PathRejection>,
     payload: Result<Json<Option<SelectorDto>>, JsonRejection>,
@@ -333,7 +333,7 @@ async fn set_default(
     Ok(StatusCode::NO_CONTENT)
 }
 async fn settings(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 1]>, PathRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let [id] = ids(path)?;
@@ -348,7 +348,7 @@ async fn settings(
 }
 
 async fn release_settings(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 2]>, PathRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let [id, release] = ids(path)?;

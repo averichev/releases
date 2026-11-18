@@ -159,9 +159,9 @@ mod desktop {
                 Command::new(env!("CARGO_BIN_EXE_veruna-releases"))
                     .env_clear()
                     .env("PATH", root)
-                    .env("VERUNA__SERVER__BIND", address.to_string())
-                    .env("VERUNA__AUTH__PUBLIC_ORIGIN", &origin)
-                    .env("VERUNA__DOWNLOAD__PUBLIC_BASE_URL", &origin)
+                    .env("SERVER__BIND", address.to_string())
+                    .env("AUTH__PUBLIC_ORIGIN", &origin)
+                    .env("DOWNLOAD__PUBLIC_BASE_URL", &origin)
                     .current_dir(root)
                     .stdin(Stdio::null())
                     .stdout(log.try_clone().unwrap())
@@ -206,4 +206,20 @@ mod desktop {
             assert!(response.contains(r#""status":"ok""#), "{response}");
         }
     }
+}
+
+#[tokio::test]
+async fn automatic_origins_stay_automatic_after_port_fallback() {
+    let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config = AppConfig::default();
+    config.server.bind = occupied.local_addr().unwrap();
+    let listener = startup::bind(&mut config).await.unwrap();
+    assert_ne!(config.server.bind, occupied.local_addr().unwrap());
+    assert_eq!(config.server.bind, listener.local_addr().unwrap());
+    assert!(config.auth.public_origin.is_empty());
+    assert!(config.download.public_base_url.is_empty());
+    assert_eq!(
+        startup::browser_url(&config),
+        Some(format!("http://{}/admin", config.server.bind))
+    );
 }

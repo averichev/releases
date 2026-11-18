@@ -89,7 +89,7 @@ Upload: проверка сессии, принадлежности, draft и м
 
 ## Конфигурация и proxy
 
-По умолчанию max_file_bytes = 2147483648 (2 GiB), max_request_bytes = 2148532224 (файл + 1 MiB multipart overhead), upload_idle_seconds = 120 (допустимо 1–86400). Размеры — положительные целые, max_request_bytes строго больше max_file_bytes; размер файла должен помещаться в положительный INTEGER SQLite. Настройки доступны через TOML и соответствующие `VERUNA__STORAGE__…`.
+По умолчанию max_file_bytes = 2147483648 (2 GiB), max_request_bytes = 2148532224 (файл + 1 MiB multipart overhead), upload_idle_seconds = 120 (допустимо 1–86400). Размеры — положительные целые, max_request_bytes строго больше max_file_bytes; размер файла должен помещаться в положительный INTEGER SQLite. Настройки доступны через TOML и соответствующие `STORAGE__…`.
 
 Пример production:
 
@@ -116,6 +116,7 @@ location /api/v1/admin/applications/ {
     proxy_send_timeout 120s;
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header Forwarded "";
 }
 ```

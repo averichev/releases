@@ -1,10 +1,9 @@
 # Nginx delivery
 
-Включите `veruna.conf` внутри `http {}`. Измените пути сертификатов и `alias`: последний должен указывать **точно** на `storage.directory`, без `.tmp`, icons или БД. Rust слушает loopback, наружу открыт только Nginx. В TOML:
+Включите `veruna.conf` внутри `http {}`. Измените пути сертификатов и `alias`: последний должен указывать **точно** на `storage.directory`, без `.tmp`, icons или БД. Rust слушает loopback, наружу открыт только Nginx. Nginx перезаписывает Host и X-Forwarded-Proto; при локальном upstream домен и HTTPS определяются автоматически. В TOML:
 
 ```toml
 [download]
-public_base_url = "https://apps.veruna.systems"
 delivery_mode = "nginx"
 max_concurrent_downloads = 64
 ```

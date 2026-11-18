@@ -10,7 +10,7 @@ use crate::{
 };
 use axum::{
     Extension, Json, Router,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{Path, rejection::JsonRejection},
     http::StatusCode,
     middleware,
     routing::{any, get, patch, post},
@@ -37,7 +37,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(super::distribution::admin_router())
         .merge(super::tauri_integration::router())
         .merge(super::artifacts::router(&state))
-        .layer(middleware::from_fn_with_state(state, auth::require_session))
+        .layer(middleware::from_fn(auth::require_session))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -66,7 +66,7 @@ fn token_dto(state: &AppState, token: IssuedToken) -> serde_json::Value {
     serde_json::json!({"activation_url":format!("{}/admin/activate#token={}",state.auth_config.public_origin,token.token),"expires_at":token.expires_at})
 }
 async fn list(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
 ) -> Result<Json<Vec<UserDto>>, ApiError> {
     Ok(Json(
@@ -80,7 +80,7 @@ async fn list(
     ))
 }
 async fn create(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     payload: Result<Json<Create>, JsonRejection>,
 ) -> Result<(StatusCode, Json<UserDto>), ApiError> {
@@ -93,7 +93,7 @@ async fn create(
     Ok((StatusCode::CREATED, Json(user.into())))
 }
 async fn invite(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     payload: Result<Json<Invite>, JsonRejection>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
@@ -106,7 +106,7 @@ async fn invite(
     ))
 }
 async fn role(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     Path(id): Path<String>,
     payload: Result<Json<RoleRequest>, JsonRejection>,
@@ -116,7 +116,7 @@ async fn role(
     Ok(StatusCode::NO_CONTENT)
 }
 async fn status(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     Path(id): Path<String>,
     payload: Result<Json<StatusRequest>, JsonRejection>,
@@ -128,7 +128,7 @@ async fn status(
     Ok(StatusCode::NO_CONTENT)
 }
 async fn reinvite(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -138,7 +138,7 @@ async fn reinvite(
     )))
 }
 async fn reset(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -148,7 +148,7 @@ async fn reset(
     )))
 }
 async fn revoke(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {

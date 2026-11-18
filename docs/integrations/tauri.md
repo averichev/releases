@@ -4,7 +4,7 @@
 `/admin/applications/:applicationId/integrations/tauri`.
 Это инструкция по подключению клиентского проекта к существующему серверу обновлений. Сервер не модифицирует исходники приложения.
 
-Мастер получает имя, постоянный slug, публичный адрес `download.public_base_url`, сохранённый публичный ключ, текущий релиз выбранного канала, updater-пакеты и результаты проверки публикации. Пакетный менеджер, шаг и канал сохраняются в query-параметрах страницы, поэтому перезагрузка и возврат сохраняют выбранный шаг. Оператор может читать инструкцию и выполнять диагностику; сохранение ключа требует администратора, действующей сессии и CSRF.
+Мастер получает имя, постоянный slug, публичный адрес текущего HTTPS-домена (или явного `download.public_base_url`), сохранённый публичный ключ, текущий релиз выбранного канала, updater-пакеты и результаты проверки публикации. Пакетный менеджер, шаг и канал сохраняются в query-параметрах страницы, поэтому перезагрузка и возврат сохраняют выбранный шаг. Оператор может читать инструкцию и выполнять диагностику; сохранение ключа требует администратора, действующей сессии и CSRF.
 
 Источники API: [Tauri Updater](https://v2.tauri.app/plugin/updater/), [JavaScript API](https://v2.tauri.app/reference/javascript/updater/), [Rust UpdaterBuilder](https://docs.rs/tauri-plugin-updater/latest/tauri_plugin_updater/struct.UpdaterBuilder.html), [Process](https://v2.tauri.app/plugin/process/), [конфигурация Tauri](https://v2.tauri.app/reference/config/).
 
@@ -81,7 +81,7 @@ API принимает только публичный Tauri/minisign envelope �
 
 Объедините фрагмент с `src-tauri/tauri.conf.json`, сохранив `identifier`, `version`, `productName`, параметры bundler и других плагинов. Не заменяйте весь файл.
 
-`{{target}}`, `{{arch}}`, `{{current_version}}` заполняет клиент Tauri. Оставьте их как есть. Для macOS target — `darwin`; для Windows/Linux — `windows`/`linux`. Production требует HTTPS. Адрес не зависит от HTTP Host/Forwarded запроса к панели.
+`{{target}}`, `{{arch}}`, `{{current_version}}` заполняет клиент Tauri. Оставьте их как есть. Для macOS target — `darwin`; для Windows/Linux — `windows`/`linux`. Production требует HTTPS. По умолчанию адрес использует домен панели, HTTPS подтверждается локальным proxy. Явный `download.public_base_url` фиксирует отдельный домен; Forwarded игнорируется.
 
 Статический endpoint фиксирует канал в сборке. Для beta используется `/beta/` вместо `/stable/`. Изменение current на сервере меняет предлагаемый релиз **внутри канала**, но не переключает установленный клиент между каналами. `{{channel}}` не является переменной Tauri.
 

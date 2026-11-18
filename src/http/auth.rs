@@ -6,7 +6,7 @@ use crate::{
 };
 use axum::{
     Extension, Json, Router,
-    extract::{Request, State, rejection::JsonRejection},
+    extract::{Request, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -70,13 +70,13 @@ pub(super) fn json<T>(value: Result<Json<T>, JsonRejection>) -> Result<T, ApiErr
     value.map(|Json(v)| v).map_err(|_| ApiError::BadRequest)
 }
 
-pub fn router(state: AppState) -> Router<AppState> {
+pub fn router() -> Router<AppState> {
     let protected = Router::new()
         .route("/logout", post(logout))
         .route("/me", get(me))
         .route("/change-password", post(change_password))
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
-        .layer(axum::middleware::from_fn_with_state(state, require_session));
+        .layer(axum::middleware::from_fn(require_session));
     Router::new()
         .route("/login", post(login))
         .route("/token/check", post(check_token))
@@ -126,7 +126,7 @@ fn set_cookie(
 // Applied to anonymous mutations too: a fixed custom header requires same-origin
 // JavaScript/preflight; the exact configured Origin rejects login CSRF and DNS rebinding.
 pub async fn same_origin(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
@@ -149,7 +149,7 @@ fn valid_origin(headers: &HeaderMap, state: &AppState) -> bool {
             == Some("1")
 }
 pub async fn require_session(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
@@ -184,7 +184,7 @@ pub async fn require_admin(request: Request, next: Next) -> Result<Response, Api
     Ok(next.run(request).await)
 }
 async fn login(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     headers: HeaderMap,
     payload: Result<Json<Credentials>, JsonRejection>,
 ) -> Result<Response, ApiError> {
@@ -210,7 +210,7 @@ async fn login(
         .into_response())
 }
 async fn me(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(identity): Extension<Identity>,
     headers: HeaderMap,
 ) -> Result<Json<Me>, ApiError> {
@@ -221,7 +221,7 @@ async fn me(
     }))
 }
 async fn logout(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(identity): Extension<Identity>,
 ) -> Result<Response, ApiError> {
     state.sessions.logout(&identity).await?;
@@ -232,7 +232,7 @@ async fn logout(
         .into_response())
 }
 async fn change_password(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(identity): Extension<Identity>,
     payload: Result<Json<ChangePassword>, JsonRejection>,
 ) -> Result<Response, ApiError> {
@@ -251,7 +251,7 @@ async fn change_password(
         .into_response())
 }
 async fn check_token(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     payload: Result<Json<Token>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let (username, purpose) = state
@@ -263,7 +263,7 @@ async fn check_token(
     ))
 }
 async fn activate(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     payload: Result<Json<Activate>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
     let payload = json(payload)?;

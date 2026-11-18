@@ -39,6 +39,8 @@ impl TestApp {
     async fn new() -> Self {
         let dir = tempdir().unwrap();
         let mut config = AppConfig::default();
+        config.auth.public_origin = "http://127.0.0.1:8080".into();
+        config.download.public_base_url = "http://127.0.0.1:8080".into();
         config.database.path = dir.path().join("db.sqlite");
         config.storage.directory = dir.path().join("artifacts");
         config.storage.icons_directory = dir.path().join("icons");

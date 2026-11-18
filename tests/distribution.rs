@@ -40,6 +40,8 @@ impl TestApp {
     async fn new(mode: DeliveryMode) -> Self {
         let dir = tempdir().unwrap();
         let mut config = AppConfig::default();
+        config.auth.public_origin = "http://127.0.0.1:8080".into();
+        config.download.public_base_url = "http://127.0.0.1:8080".into();
         config.database.path = dir.path().join("db.sqlite");
         config.storage.directory = dir.path().join("objects");
         config.storage.icons_directory = dir.path().join("icons");
@@ -1412,4 +1414,74 @@ async fn tauri_readiness_distinguishes_published_release_empty_channel_and_insta
         .status(),
         200
     );
+}
+
+#[tokio::test]
+async fn automatic_domain_is_used_in_manifests_tauri_and_integration_without_shared_state() {
+    use axum::extract::ConnectInfo;
+    let mut t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("1.0.0").await;
+    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.state
+        .artifacts
+        .set_updater(
+            &t.actor,
+            &t.app,
+            &r.id,
+            &a.id,
+            Some("updater"),
+            Some(Some(signature().as_bytes())),
+        )
+        .await
+        .unwrap();
+    t.publish(&r, "stable").await;
+    t.state.auth_config.public_origin.clear();
+    t.state.distribution.config.public_base_url.clear();
+    t.router = http::router(t.state.clone());
+    for host in ["releases.example.test", "another.example.test:8443"] {
+        let origin = format!("https://{host}");
+        for path in [
+            "/product/manifest.json".to_owned(),
+            "/api/v1/updates/tauri/product/stable/windows/x86_64/0.1.0".to_owned(),
+            format!("/api/v1/admin/applications/{}/integrations/tauri", t.app),
+        ] {
+            let response = t
+                .router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(&path)
+                        .extension(ConnectInfo(
+                            "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+                        ))
+                        .header("host", host)
+                        .header("x-forwarded-proto", "https")
+                        .header("x-forwarded-host", "attacker.example")
+                        .header("cookie", format!("__Host-veruna_session={}", t.token))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200, "{path}");
+            let value = json_body(response).await;
+            if path.ends_with("manifest.json") {
+                assert_eq!(
+                    value["releases"][0]["artifacts"][0]["download_url"],
+                    format!("{origin}{}", t.url(&r, &a, "stable"))
+                );
+            } else if path.contains("/updates/tauri/") {
+                assert_eq!(value["url"], format!("{origin}{}", t.url(&r, &a, "stable")));
+            } else {
+                assert_eq!(value["public_base_url"], origin);
+                assert!(
+                    value["endpoint"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with(&format!("{origin}/api/v1/updates/tauri/"))
+                );
+            }
+        }
+    }
+    assert!(t.state.distribution.config.public_base_url.is_empty());
 }

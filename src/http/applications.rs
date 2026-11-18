@@ -10,7 +10,7 @@ use axum::{
     Extension, Json, Router,
     body::Bytes,
     extract::{
-        DefaultBodyLimit, Path, Query, State,
+        DefaultBodyLimit, Path, Query,
         rejection::{BytesRejection, JsonRejection, PathRejection, QueryRejection},
     },
     http::{StatusCode, header},
@@ -131,7 +131,7 @@ fn payload<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
         .map_err(|_| ApiError::InvalidApplication)
 }
 async fn list(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     query: Result<Query<ListRequest>, QueryRejection>,
 ) -> Result<Json<PageDto>, ApiError> {
     let Query(q) = query.map_err(|_| ApiError::InvalidApplication)?;
@@ -170,13 +170,13 @@ async fn list(
     }))
 }
 async fn get_one(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Json<ApplicationDto>, ApiError> {
     Ok(Json(state.applications.get(&id(path)?).await?.into()))
 }
 async fn create(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     request: Result<Json<CreateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ApplicationDto>), ApiError> {
@@ -196,7 +196,7 @@ async fn create(
     Ok((StatusCode::CREATED, Json(app.into())))
 }
 async fn update(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<String>, PathRejection>,
     request: Result<Json<UpdateRequest>, JsonRejection>,
@@ -219,7 +219,7 @@ async fn update(
     ))
 }
 async fn archive(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Json<ApplicationDto>, ApiError> {
@@ -232,7 +232,7 @@ async fn archive(
     ))
 }
 async fn restore(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Json<ApplicationDto>, ApiError> {
@@ -245,7 +245,7 @@ async fn restore(
     ))
 }
 async fn upload_icon(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<String>, PathRejection>,
     bytes: Result<Bytes, BytesRejection>,
@@ -263,7 +263,7 @@ async fn upload_icon(
     ))
 }
 async fn remove_icon(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Json<ApplicationDto>, ApiError> {
@@ -276,7 +276,7 @@ async fn remove_icon(
     ))
 }
 async fn icon(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok((

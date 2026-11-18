@@ -1,7 +1,8 @@
 # Relative paths are resolved against the process working directory.
 [server]
 bind = "127.0.0.1:8080"
-# Automatic fallback only for loopback with matching auth/download origins.
+# Automatic fallback only for loopback with automatic/matching origins.
+# For a service behind nginx set auto_port = false.
 auto_port = true
 # Open the local panel after startup. Set false for headless installations.
 open_browser = true
@@ -24,15 +25,16 @@ upload_idle_seconds = 120
 [logging]
 filter = "info,tower_http=info"
 
-# Exact browser origin, without a trailing slash. Use HTTPS in production.
-# With Vite use http://127.0.0.1:5173 instead.
+# Empty means automatic from the request domain and loopback proxy HTTPS.
+# With Vite set public_origin = "http://127.0.0.1:5173" instead.
 [auth]
-public_origin = "http://127.0.0.1:8080"
+public_origin = ""
 session_ttl_seconds = 43200
 invitation_ttl_seconds = 86400
 
-# Trusted URL source for manifests/updater; never inferred from Host.
+# Empty means automatic, using the same domain as the current request.
+# Set a fixed HTTPS origin only for a separate download domain.
 [download]
-public_base_url = "http://127.0.0.1:8080"
+public_base_url = ""
 delivery_mode = "direct" # nginx requires deploy/nginx/veruna.conf
 max_concurrent_downloads = 64

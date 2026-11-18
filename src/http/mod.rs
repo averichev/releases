@@ -7,6 +7,7 @@ mod delivery;
 mod distribution;
 mod error;
 mod health;
+mod origin;
 mod publication;
 mod releases;
 mod tauri_integration;
@@ -32,6 +33,7 @@ use error::ApiError;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub server_bind: std::net::SocketAddr,
     pub distribution: crate::services::distribution::PublicDistribution,
     pub publishing: crate::services::publishing::ReleasePublishing,
     pub manifests: crate::services::manifest::ManifestGeneration,
@@ -51,7 +53,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     let public = Router::new().route("/health", get(health::get));
     let v1 = public
-        .nest("/auth", auth::router(state.clone()))
+        .nest("/auth", auth::router())
         .merge(admin::router(state.clone()))
         .merge(distribution::api_router())
         .fallback(not_found);
@@ -75,7 +77,8 @@ pub fn router(state: AppState) -> Router {
         .fallback(assets::serve)
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
         .layer(axum::extract::DefaultBodyLimit::max(8192))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), auth::same_origin))
+        .layer(axum::middleware::from_fn(auth::same_origin))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), origin::resolve))
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
         .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")))

@@ -37,7 +37,7 @@ pub struct DownloadConfig {
 impl Default for DownloadConfig {
     fn default() -> Self {
         Self {
-            public_base_url: "http://127.0.0.1:8080".into(),
+            public_base_url: String::new(),
             delivery_mode: DeliveryMode::Direct,
             max_concurrent_downloads: 64,
         }
@@ -89,7 +89,7 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            public_origin: "http://127.0.0.1:8080".into(),
+            public_origin: String::new(),
             session_ttl_seconds: 43_200,
             invitation_ttl_seconds: 86_400,
         }
@@ -146,7 +146,7 @@ impl Default for LoggingConfig {
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
-        let explicit = std::env::var_os("VERUNA_CONFIG").map(PathBuf::from);
+        let explicit = std::env::var_os("CONFIG").map(PathBuf::from);
         let default_path = Path::new("veruna.toml");
         let path = explicit
             .as_deref()
@@ -162,11 +162,12 @@ impl AppConfig {
         }
         let settings: Self = builder
             .add_source(
-                Environment::with_prefix("VERUNA")
-                    .prefix_separator("__")
+                Environment::default()
                     .separator("__")
                     .try_parsing(true)
-                    .source(Some(environment)),
+                    .source(Some(configuration_environment(
+                        environment.into_iter().map(|(k, v)| (k.into(), v.into())),
+                    )?)),
             )
             .build()
             .context("Cannot load configuration")?
@@ -224,17 +225,22 @@ impl AppConfig {
             !self.logging.filter.trim().is_empty(),
             "logging.filter must not be empty"
         );
-        let origin =
-            url::Url::parse(&self.auth.public_origin).context("Invalid auth.public_origin")?;
-        ensure!(
-            origin.origin().ascii_serialization() == self.auth.public_origin
-                && origin.username().is_empty()
-                && origin.password().is_none()
-                && (origin.scheme() == "https"
-                    || (origin.scheme() == "http"
-                        && matches!(origin.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))),
-            "auth.public_origin must be an HTTPS origin, or HTTP on loopback, without path or trailing slash"
-        );
+        if !self.auth.public_origin.is_empty() {
+            let origin =
+                url::Url::parse(&self.auth.public_origin).context("Invalid auth.public_origin")?;
+            ensure!(
+                origin.origin().ascii_serialization() == self.auth.public_origin
+                    && origin.username().is_empty()
+                    && origin.password().is_none()
+                    && (origin.scheme() == "https"
+                        || (origin.scheme() == "http"
+                            && matches!(
+                                origin.host_str(),
+                                Some("localhost" | "127.0.0.1" | "[::1]")
+                            ))),
+                "auth.public_origin must be an HTTPS origin, or HTTP on loopback, without path or trailing slash"
+            );
+        }
         ensure!(
             (60..=2_592_000).contains(&self.auth.session_ttl_seconds),
             "auth.session_ttl_seconds must be between 60 and 2592000"
@@ -243,17 +249,22 @@ impl AppConfig {
             (60..=604_800).contains(&self.auth.invitation_ttl_seconds),
             "auth.invitation_ttl_seconds must be between 60 and 604800"
         );
-        let base = url::Url::parse(&self.download.public_base_url)
-            .context("Invalid download.public_base_url")?;
-        ensure!(
-            base.origin().ascii_serialization() == self.download.public_base_url
-                && base.username().is_empty()
-                && base.password().is_none()
-                && (base.scheme() == "https"
-                    || (base.scheme() == "http"
-                        && matches!(base.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))),
-            "download.public_base_url must be an HTTPS origin, or HTTP on loopback, without path or trailing slash"
-        );
+        if !self.download.public_base_url.is_empty() {
+            let base = url::Url::parse(&self.download.public_base_url)
+                .context("Invalid download.public_base_url")?;
+            ensure!(
+                base.origin().ascii_serialization() == self.download.public_base_url
+                    && base.username().is_empty()
+                    && base.password().is_none()
+                    && (base.scheme() == "https"
+                        || (base.scheme() == "http"
+                            && matches!(
+                                base.host_str(),
+                                Some("localhost" | "127.0.0.1" | "[::1]")
+                            ))),
+                "download.public_base_url must be an HTTPS origin, or HTTP on loopback, without path or trailing slash"
+            );
+        }
         ensure!(
             (1..=4096).contains(&self.download.max_concurrent_downloads),
             "download.max_concurrent_downloads must be between 1 and 4096"
@@ -270,9 +281,26 @@ fn configuration_environment(
     let mut settings = HashMap::new();
     for (name, value) in environment {
         // Unrelated environment values may contain arbitrary platform bytes.
-        let Some(name) = name.to_str().filter(|name| name.starts_with("VERUNA__")) else {
+        let Some(name) = name.to_str() else {
             continue;
         };
+        ensure!(
+            !name.starts_with("VERUNA__") && name != "VERUNA_CONFIG",
+            "Remove the VERUNA prefix from configuration variable {name}"
+        );
+        if ![
+            "SERVER__",
+            "DATABASE__",
+            "STORAGE__",
+            "LOGGING__",
+            "AUTH__",
+            "DOWNLOAD__",
+        ]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        {
+            continue;
+        }
         let value = value
             .into_string()
             .map_err(|_| anyhow::anyhow!("{name} must contain valid UTF-8"))?;
@@ -292,7 +320,7 @@ mod tests {
         let environment = [
             (OsString::from("_"), OsString::from_vec(vec![0xff])),
             (
-                OsString::from("VERUNA__SERVER__BIND"),
+                OsString::from("SERVER__BIND"),
                 OsString::from("127.0.0.1:8081"),
             ),
         ];
@@ -304,14 +332,14 @@ mod tests {
     #[test]
     fn rejects_non_unicode_configuration_without_panicking_or_echoing_value() {
         let environment = [(
-            OsString::from("VERUNA__STORAGE__DIRECTORY"),
+            OsString::from("STORAGE__DIRECTORY"),
             OsString::from_vec(vec![0xff]),
         )];
         assert_eq!(
             configuration_environment(environment)
                 .unwrap_err()
                 .to_string(),
-            "VERUNA__STORAGE__DIRECTORY must contain valid UTF-8"
+            "STORAGE__DIRECTORY must contain valid UTF-8"
         );
     }
 }

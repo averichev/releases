@@ -65,6 +65,10 @@ pub struct TauriIntegration {
     validator: PublicationValidator,
 }
 impl TauriIntegration {
+    pub fn with_distribution(mut self, distribution: PublicDistribution) -> Self {
+        self.distribution = distribution;
+        self
+    }
     pub fn new(
         applications: ApplicationsRepository,
         distribution: PublicDistribution,
@@ -120,7 +124,7 @@ impl TauriIntegration {
         {
             block(
                 "public_url_insecure",
-                "Публичный адрес использует HTTP. Для production Tauri требуется HTTPS; проверьте download.public_base_url.",
+                "Публичный адрес использует HTTP. Для production Tauri требуется HTTPS; проверьте HTTPS и настройки reverse proxy.",
             );
         }
         let mut packages = Vec::new();

@@ -46,6 +46,9 @@ pub async fn reset_password(config: &AppConfig, stdin: bool) -> Result<()> {
             "{}/admin/activate#token={}",
             config.auth.public_origin, issued.token
         );
+        if config.auth.public_origin.is_empty() {
+            println!("Откройте этот путь на домене панели администратора.");
+        }
         println!("Предыдущая ссылка отменена. Сохраните эту ссылку в безопасном месте.");
         Ok(())
     }

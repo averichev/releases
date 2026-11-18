@@ -32,11 +32,11 @@ def main():
     started = False
     with tempfile.TemporaryDirectory(prefix=".veruna-nginx-", dir=ROOT) as directory:
         root = Path(directory)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("VERUNA_")}
-        env.update({"VERUNA__SERVER__BIND": f"0.0.0.0:{backend_port}", "VERUNA__AUTH__PUBLIC_ORIGIN": backend,
-                    "VERUNA__DOWNLOAD__PUBLIC_BASE_URL": base, "VERUNA__DOWNLOAD__DELIVERY_MODE": "nginx",
-                    "VERUNA__DATABASE__PATH": str(root / "db.sqlite"), "VERUNA__STORAGE__DIRECTORY": str(root / "objects"),
-                    "VERUNA__STORAGE__ICONS_DIRECTORY": str(root / "icons")})
+        env = {k: v for k, v in os.environ.items() if k != "CONFIG" and not k.startswith(("VERUNA_", "SERVER__", "DATABASE__", "STORAGE__", "LOGGING__", "AUTH__", "DOWNLOAD__"))}
+        env.update({"SERVER__BIND": f"0.0.0.0:{backend_port}", "AUTH__PUBLIC_ORIGIN": backend,
+                    "DOWNLOAD__PUBLIC_BASE_URL": base, "DOWNLOAD__DELIVERY_MODE": "nginx",
+                    "DATABASE__PATH": str(root / "db.sqlite"), "STORAGE__DIRECTORY": str(root / "objects"),
+                    "STORAGE__ICONS_DIRECTORY": str(root / "icons")})
         password = secrets.token_urlsafe(24)
         boot = subprocess.run([str(binary), "admin", "bootstrap", "--stdin"], input=f"owner\n{password}\n", text=True, capture_output=True, cwd=root, env=env, timeout=30)
         assert boot.returncode == 0, boot.stderr

@@ -31,6 +31,8 @@ impl TestApp {
     async fn new() -> Self {
         let dir = tempdir().unwrap();
         let mut config = AppConfig::default();
+        config.auth.public_origin = "http://127.0.0.1:8080".into();
+        config.download.public_base_url = "http://127.0.0.1:8080".into();
         config.database.path = dir.path().join("db.sqlite");
         config.storage.directory = dir.path().join("artifacts");
         config.storage.icons_directory = dir.path().join("icons");
@@ -809,4 +811,155 @@ async fn blocking_an_invitation_invalidates_it_and_unblocking_requires_reissue()
         .unwrap()
         .to_owned();
     assert_eq!(app.activate(&token).await.status(), 204);
+}
+
+#[tokio::test]
+async fn automatic_origin_uses_each_proxy_request_and_keeps_csrf_and_secure_cookies() {
+    use axum::extract::ConnectInfo;
+    let mut app = TestApp::new().await;
+    app.bootstrap().await;
+    app.state.auth_config.public_origin.clear();
+    app.state.distribution.config.public_base_url.clear();
+    app.router = http::router(app.state.clone());
+    for (index, host) in ["releases.example.test", "another.example.test:8443"]
+        .into_iter()
+        .enumerate()
+    {
+        let origin = format!("https://{host}");
+        let response = app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .extension(ConnectInfo(
+                        "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+                    ))
+                    .header("host", host)
+                    .header("x-forwarded-proto", "https")
+                    .header("x-forwarded-host", "attacker.example")
+                    .header("forwarded", "host=attacker.example;proto=http")
+                    .header("origin", &origin)
+                    .header("x-veruna-request", "1")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({"username":"admin","password":PASSWORD}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let cookie = response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(cookie.starts_with("__Host-veruna_session="));
+        assert!(cookie.contains("; Secure") && !cookie.contains("Domain="));
+        let cookie = cookie.split(';').next().unwrap();
+        let csrf = body(response).await["csrf_token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for (request_origin, expected) in [("https://attacker.example", 403), (&origin, 201)] {
+            let response = app
+                .router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/admin/users/invitations")
+                        .extension(ConnectInfo(
+                            "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+                        ))
+                        .header("host", host)
+                        .header("x-forwarded-proto", "https")
+                        .header("origin", request_origin)
+                        .header("x-veruna-request", "1")
+                        .header("cookie", cookie)
+                        .header("x-csrf-token", &csrf)
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({"username":format!("invited-{index}"),"role":"operator"})
+                                .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+            if expected == 201 {
+                assert!(
+                    body(response).await["activation_url"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with(&format!("{origin}/admin/activate#token="))
+                );
+            }
+        }
+    }
+    assert!(app.state.auth_config.public_origin.is_empty());
+    assert!(app.state.distribution.config.public_base_url.is_empty());
+}
+
+#[tokio::test]
+async fn automatic_origin_rejects_rebinding_untrusted_proxy_and_ambiguous_headers() {
+    use axum::extract::ConnectInfo;
+    let mut app = TestApp::new().await;
+    app.state.auth_config.public_origin.clear();
+    app.state.distribution.config.public_base_url.clear();
+    app.router = http::router(app.state.clone());
+    for (peer, host, proto) in [
+        ("203.0.113.10:12345", "releases.example.test", Some("https")),
+        ("127.0.0.1:12345", "attacker.example", None),
+        (
+            "127.0.0.1:12345",
+            "releases.example.test",
+            Some("https,http"),
+        ),
+        (
+            "127.0.0.1:12345",
+            "user@releases.example.test",
+            Some("https"),
+        ),
+        (
+            "127.0.0.1:12345",
+            "releases.example.test/path",
+            Some("https"),
+        ),
+        ("127.0.0.1:12345", "releases.example.test:0", Some("https")),
+    ] {
+        let mut request = Request::builder()
+            .uri("/api/v1/health")
+            .extension(ConnectInfo(peer.parse::<std::net::SocketAddr>().unwrap()))
+            .header("host", host);
+        if let Some(proto) = proto {
+            request = request.header("x-forwarded-proto", proto);
+        }
+        assert_eq!(
+            app.router
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status(),
+            400,
+            "{peer} {host} {proto:?}"
+        );
+    }
+    let request = Request::builder()
+        .uri("/api/v1/health")
+        .extension(ConnectInfo(
+            "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+        ))
+        .header("host", "releases.example.test")
+        .header("host", "attacker.example")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.router.clone().oneshot(request).await.unwrap().status(),
+        400
+    );
 }

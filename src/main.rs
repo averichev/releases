@@ -38,11 +38,14 @@ async fn main() -> Result<()> {
 
     let grace = Duration::from_secs(config.server.shutdown_timeout_seconds);
     let (stop, stopped) = oneshot::channel::<()>();
-    let server = axum::serve(listener, http::router(state))
-        .with_graceful_shutdown(async {
-            let _ = stopped.await;
-        })
-        .into_future();
+    let server = axum::serve(
+        listener,
+        http::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = stopped.await;
+    })
+    .into_future();
     tokio::pin!(server);
 
     // Poll the server first so it is accepting requests before the browser opens.

@@ -47,7 +47,7 @@ curl --fail http://127.0.0.1:8080/api/v1/health
 
 ```sh
 # Терминал 1: backend; после изменений Rust перезапустите команду.
-VERUNA__AUTH__PUBLIC_ORIGIN=http://127.0.0.1:5173 cargo run --locked
+AUTH__PUBLIC_ORIGIN=http://127.0.0.1:5173 cargo run --locked
 ```
 
 ```sh
@@ -58,51 +58,51 @@ npm --prefix frontend run dev
 Для разработки интерфейса открывайте [Vite](http://127.0.0.1:5173). Он проксирует `/api` на `http://127.0.0.1:8080`, поэтому CORS не требуется. При другом адресе backend:
 
 ```sh
-VERUNA_DEV_API_TARGET=http://127.0.0.1:9090 npm --prefix frontend run dev
+DEV_API_TARGET=http://127.0.0.1:9090 npm --prefix frontend run dev
 ```
 
 Порт Rust продолжает обслуживать **последнюю встроенную сборку**. Чтобы обновить её, выполните `npm --prefix frontend run build` и перезапустите `cargo run --locked`. Ресурсы встроены и в debug-, и в release-бинарник. `build.rs` отслеживает `frontend/dist` и миграции; без предварительно собранного фронтенда Cargo завершится с инструкцией по сборке. Cargo не запускает npm и не устанавливает JS-зависимости неявно.
 
 ## Конфигурация
 
-Приоритет: встроенные значения → `veruna.toml` → переменные `VERUNA__…`. Конфигурационный файл необязателен; скопируйте `veruna.example.toml` в `veruna.toml`, если нужна локальная настройка. `.env` автоматически не загружается.
+Приоритет: встроенные значения → `veruna.toml` → переменные `SERVER__…`, `DATABASE__…`, `STORAGE__…`, `LOGGING__…`, `AUTH__…`, `DOWNLOAD__…`. Конфигурационный файл необязателен; скопируйте `veruna.example.toml` в `veruna.toml`, если нужна локальная настройка. `.env` автоматически не загружается.
 
 Можно выбрать другой TOML-файл:
 
 ```sh
-VERUNA_CONFIG=/etc/veruna/releases.toml ./target/release/veruna-releases
+CONFIG=/etc/veruna/releases.toml ./target/release/veruna-releases
 ```
 
-Явно указанный файл обязан существовать. Неизвестные поля и опечатки в `VERUNA__…`, неверные типы и недопустимые значения приводят к ошибке запуска. Относительные пути всегда отсчитываются от **рабочего каталога процесса**, а не от расположения TOML или бинарника. Для production используйте абсолютные пути.
+Явно указанный файл обязан существовать. Неизвестные поля и опечатки в этих переменных, неверные типы и недопустимые значения приводят к ошибке запуска. Относительные пути всегда отсчитываются от **рабочего каталога процесса**, а не от расположения TOML или бинарника. Для production используйте абсолютные пути.
 
 | TOML | Переменная | По умолчанию |
 | --- | --- | --- |
-| `server.bind` | `VERUNA__SERVER__BIND` | `127.0.0.1:8080` |
-| `server.auto_port` | `VERUNA__SERVER__AUTO_PORT` | `true` |
-| `server.open_browser` | `VERUNA__SERVER__OPEN_BROWSER` | `true` |
-| `server.shutdown_timeout_seconds` | `VERUNA__SERVER__SHUTDOWN_TIMEOUT_SECONDS` | `15` |
-| `database.path` | `VERUNA__DATABASE__PATH` | `data/veruna.sqlite` |
-| `database.max_connections` | `VERUNA__DATABASE__MAX_CONNECTIONS` | `4` |
-| `database.busy_timeout_seconds` | `VERUNA__DATABASE__BUSY_TIMEOUT_SECONDS` | `5` |
-| `storage.directory` | `VERUNA__STORAGE__DIRECTORY` | `data/artifacts` |
-| `storage.icons_directory` | `VERUNA__STORAGE__ICONS_DIRECTORY` | `data/icons` |
-| `storage.temporary_directory` | `VERUNA__STORAGE__TEMPORARY_DIRECTORY` | `<storage.directory>/.tmp` |
-| `storage.max_file_bytes` | `VERUNA__STORAGE__MAX_FILE_BYTES` | `2147483648` (2 GiB) |
-| `storage.max_request_bytes` | `VERUNA__STORAGE__MAX_REQUEST_BYTES` | `2148532224` |
-| `storage.upload_idle_seconds` | `VERUNA__STORAGE__UPLOAD_IDLE_SECONDS` | `120` |
-| `auth.public_origin` | `VERUNA__AUTH__PUBLIC_ORIGIN` | `http://127.0.0.1:8080` |
-| `auth.session_ttl_seconds` | `VERUNA__AUTH__SESSION_TTL_SECONDS` | `43200` (12 часов) |
-| `auth.invitation_ttl_seconds` | `VERUNA__AUTH__INVITATION_TTL_SECONDS` | `86400` (24 часа) |
-| `download.public_base_url` | `VERUNA__DOWNLOAD__PUBLIC_BASE_URL` | `http://127.0.0.1:8080` |
-| `download.delivery_mode` | `VERUNA__DOWNLOAD__DELIVERY_MODE` | `direct` |
-| `download.max_concurrent_downloads` | `VERUNA__DOWNLOAD__MAX_CONCURRENT_DOWNLOADS` | `64` |
-| `logging.filter` | `VERUNA__LOGGING__FILTER` | `info,tower_http=info` |
+| `server.bind` | `SERVER__BIND` | `127.0.0.1:8080` |
+| `server.auto_port` | `SERVER__AUTO_PORT` | `true` |
+| `server.open_browser` | `SERVER__OPEN_BROWSER` | `true` |
+| `server.shutdown_timeout_seconds` | `SERVER__SHUTDOWN_TIMEOUT_SECONDS` | `15` |
+| `database.path` | `DATABASE__PATH` | `data/veruna.sqlite` |
+| `database.max_connections` | `DATABASE__MAX_CONNECTIONS` | `4` |
+| `database.busy_timeout_seconds` | `DATABASE__BUSY_TIMEOUT_SECONDS` | `5` |
+| `storage.directory` | `STORAGE__DIRECTORY` | `data/artifacts` |
+| `storage.icons_directory` | `STORAGE__ICONS_DIRECTORY` | `data/icons` |
+| `storage.temporary_directory` | `STORAGE__TEMPORARY_DIRECTORY` | `<storage.directory>/.tmp` |
+| `storage.max_file_bytes` | `STORAGE__MAX_FILE_BYTES` | `2147483648` (2 GiB) |
+| `storage.max_request_bytes` | `STORAGE__MAX_REQUEST_BYTES` | `2148532224` |
+| `storage.upload_idle_seconds` | `STORAGE__UPLOAD_IDLE_SECONDS` | `120` |
+| `auth.public_origin` | `AUTH__PUBLIC_ORIGIN` | автоматически из запроса |
+| `auth.session_ttl_seconds` | `AUTH__SESSION_TTL_SECONDS` | `43200` (12 часов) |
+| `auth.invitation_ttl_seconds` | `AUTH__INVITATION_TTL_SECONDS` | `86400` (24 часа) |
+| `download.public_base_url` | `DOWNLOAD__PUBLIC_BASE_URL` | автоматически из запроса |
+| `download.delivery_mode` | `DOWNLOAD__DELIVERY_MODE` | `direct` |
+| `download.max_concurrent_downloads` | `DOWNLOAD__MAX_CONCURRENT_DOWNLOADS` | `64` |
+| `logging.filter` | `LOGGING__FILTER` | `info,tower_http=info` |
 
-`server.bind` — IP и порт, например `127.0.0.1:8080`, `0.0.0.0:8080` или `[::1]:8080`. Размер пула — 1–32, таймауты — 1–300 секунд. Логи JSON выводятся в stdout; HTTP-логи содержат метод, шаблон маршрута, статус и длительность; адреса, query string, тела и заголовки с секретами не логируются. Фильтр настраивается через TOML или `VERUNA__LOGGING__FILTER`; `RUST_LOG` не используется.
+`server.bind` — IP и порт, например `127.0.0.1:8080`, `0.0.0.0:8080` или `[::1]:8080`. Размер пула — 1–32, таймауты — 1–300 секунд. Логи JSON выводятся в stdout; HTTP-логи содержат метод, шаблон маршрута, статус и длительность; адреса, query string, тела и заголовки с секретами не логируются. Фильтр настраивается через TOML или `LOGGING__FILTER`; `RUST_LOG` не используется.
 
-Автовыбор порта работает только для loopback IP, когда `auth.public_origin` и `download.public_base_url` равны `http://<server.bind>`. При занятом порте listener сразу привязывается к свободному порту без отдельной проверки с освобождением сокета; оба локальных origin обновляются до создания HTTP-состояния. `server.auto_port = false` оставляет порт фиксированным. Внешние origin (включая Vite), привязка к `0.0.0.0`/`[::]` и HTTPS сохраняют настроенный порт, чтобы не нарушить proxy и постоянные URL.
+Автовыбор порта работает только для loopback IP, когда `auth.public_origin` и `download.public_base_url` не заданы либо равны `http://<server.bind>`. При занятом порте listener сразу привязывается к свободному порту без отдельной проверки с освобождением сокета; явно заданные локальные origin обновляются до создания HTTP-состояния. `server.auto_port = false` оставляет порт фиксированным. Внешние origin (включая Vite), привязка к `0.0.0.0`/`[::]` и HTTPS сохраняют настроенный порт, чтобы не нарушить proxy и постоянные URL.
 
-Браузер открывается только при `server.open_browser = true`, loopback-привязке и совпадении `auth.public_origin` с фактическим HTTP-адресом. Используются системные `open` на macOS, `rundll32.exe` на Windows и `xdg-open` на Linux. Для запуска без рабочего стола задайте `server.open_browser = false` или `VERUNA__SERVER__OPEN_BROWSER=false`. При отдельном Vite origin браузер автоматически не открывается.
+Браузер открывается только при `server.open_browser = true`, loopback-привязке и автоматическом origin либо его совпадении с фактическим HTTP-адресом. Используются системные `open` на macOS, `rundll32.exe` на Windows и `xdg-open` на Linux. Для запуска без рабочего стола задайте `server.open_browser = false` или `SERVER__OPEN_BROWSER=false`. При отдельном Vite origin браузер автоматически не открывается.
 
 ## Production
 
@@ -147,6 +147,20 @@ dist/releases/0.1.0/
 
 Для запуска по клику выберите файл своей ОС и архитектуры: `.exe` в Windows, `macos-aarch64.tool` на Mac с Apple Silicon, `linux-x86_64` на Linux x86_64. На macOS `.tool` открывается через Terminal, который запускает бинарник; это тот же Mach-O файл, без скрипта-обёртки. Суффикс нужен Finder, чтобы точки в версии не воспринимались как неизвестное расширение документа. После успешного старта откроется браузер. Unix-бинарники сохраняют право исполнения при сборке; если способ передачи снял его, выполните `chmod +x <файл>`. На Linux запуск по клику также зависит от настроек файлового менеджера; нужен рабочий стол с `xdg-open`. Бинарники не подписаны: системные правила запуска загруженных приложений продолжают действовать. Файл Linux нельзя запускать на macOS — это вызывает `exec format error`.
 
+### Запуск через «Мой хост»
+
+Для порта `3001` в форме приложения задайте:
+
+```text
+SERVER__BIND=127.0.0.1:3001
+SERVER__AUTO_PORT=false
+SERVER__OPEN_BROWSER=false
+```
+
+Порт в форме «Мой хост» должен совпадать с `SERVER__BIND`. После привязки HTTPS-сайта домен определяется автоматически: «Мой хост» уже передаёт `Host` и `X-Forwarded-Proto` через локальный nginx. `AUTH__PUBLIC_ORIGIN` и `DOWNLOAD__PUBLIC_BASE_URL` задавать не требуется. В существующем TOML удалите эти два значения или оставьте пустыми, чтобы включить автоматический режим.
+
+Имена переменных изменены: удалите `VERUNA__` перед разделом (`VERUNA__SERVER__BIND` → `SERVER__BIND`); `VERUNA_CONFIG` заменён на `CONFIG`, `VERUNA_DEV_API_TARGET` — на `DEV_API_TARGET`. Старые серверные имена вызывают понятную ошибку запуска, чтобы порт или пути не сбросились незаметно. TOML-ключи не переименованы.
+
 ### Сборка для текущей системы
 
 ```sh
@@ -157,12 +171,12 @@ python3 scripts/smoke.py
 Результат — `target/release/veruna-releases`: скрипт явно задаёт `--target-dir target`, в том числе при пользовательских глобальных настройках Cargo. Перенесите на совместимую ОС и архитектуру **только бинарник**, при необходимости добавив TOML. Для запуска не нужны Node.js, `frontend/dist`, исходники или каталог миграций. Внешние данные — SQLite, каталог дистрибутивов и каталог иконок — остаются на диске.
 
 ```sh
-VERUNA__AUTH__PUBLIC_ORIGIN=https://apps.veruna.systems \
-VERUNA__DOWNLOAD__PUBLIC_BASE_URL=https://apps.veruna.systems \
-VERUNA__SERVER__BIND=127.0.0.1:8080 \
-VERUNA__DATABASE__PATH=/var/lib/veruna-releases/database/releases.sqlite \
-VERUNA__STORAGE__DIRECTORY=/var/lib/veruna-releases/artifacts \
-VERUNA__STORAGE__ICONS_DIRECTORY=/var/lib/veruna-releases/icons \
+SERVER__BIND=127.0.0.1:8080 \
+SERVER__AUTO_PORT=false \
+SERVER__OPEN_BROWSER=false \
+DATABASE__PATH=/var/lib/veruna-releases/database/releases.sqlite \
+STORAGE__DIRECTORY=/var/lib/veruna-releases/artifacts \
+STORAGE__ICONS_DIRECTORY=/var/lib/veruna-releases/icons \
 ./veruna-releases
 ```
 
@@ -188,6 +202,8 @@ sh scripts/build.sh
 python3 scripts/smoke.py
 ```
 
+Дополнительная проверка Linux за настоящим локальным nginx с TLS: `python3 scripts/smoke_origin.py`. Требует собранного Linux x86_64-бинарника (`make release`), Docker и OpenSSL; проверяет порт 3001, два автоматических домена, Secure-cookie, CSRF, приглашения и Tauri URL без настроек публичных адресов. Можно передать путь к бинарнику первым аргументом.
+
 `check.sh` устанавливает зависимости по lock-файлу, проверяет TypeScript, собирает UI, запускает Vitest, `cargo fmt --check`, Rust-тесты и `cargo clippy --all-targets -- -D warnings`.
 
 Тесты проверяют приоритет и ошибки конфигурации, реальные файловые пути, настройки соединений SQLite, повторное применение миграций, схему пользователей, health и его отказ, блокировку административного API, JSON-ошибки, SPA-маршруты, статические ресурсы и HEAD. Тесты авторизации покрывают bootstrap (включая настоящий CLI), вход и лимиты, роли, CSRF, приглашения и восстановление, истечение, смену пароля, отзыв сессий и конкурентную защиту последнего администратора. Фронтенд проверяет загрузку сессии, вход, вложенные страницы, запрет управления для оператора, истечение сессии, ошибки и запросы с CSRF. Smoke-тест запускает production-бинарник из временного пустого каталога, загружает HTML/JS/CSS, проверяет БД и завершает процесс SIGTERM.
@@ -200,11 +216,11 @@ python3 scripts/smoke.py
 
 Dropdown пользователя позволяет изменить роль, заблокировать/разблокировать, повторить приглашение, создать ссылку восстановления пароля и отозвать все сессии. Отключение приглашённого отзываeт приглашение; после разблокировки учётная запись возвращается в `invited`, нужно выдать новую ссылку. Смена роли также завершает сессии. Последнего активного администратора нельзя отключить или понизить; сначала создайте или активируйте другого администратора.
 
-Забытый пароль восстанавливается администратором через **Восстановить пароль** в этом же меню. Ссылка одноразовая с тем же сроком, что приглашение; при установке нового пароля все сессии отзываются. Если пароль потерян у единственного администратора, владелец сервера запускает `veruna-releases admin reset-password` с той же конфигурацией БД и внешнего origin. Команда запрашивает логин активного администратора и показывает одноразовую ссылку в консоли; HTTP-сервер для выдачи не нужен. Для pipe доступен `admin reset-password --stdin` (одна строка — логин). Предыдущая ссылка отменяется, пароль и сессии меняются только при использовании новой ссылки. Ссылку нельзя сохранять в общедоступных логах. Bootstrap существующего администратора не сбрасывает. Публичного сброса пароля нет.
+Забытый пароль восстанавливается администратором через **Восстановить пароль** в этом же меню. Ссылка одноразовая с тем же сроком, что приглашение; при установке нового пароля все сессии отзываются. Если пароль потерян у единственного администратора, владелец сервера запускает `veruna-releases admin reset-password` с той же конфигурацией БД. Команда запрашивает логин активного администратора и показывает одноразовый путь в консоли (откройте его на домене панели; при явном `auth.public_origin` выводится абсолютная ссылка); HTTP-сервер для выдачи не нужен. Для pipe доступен `admin reset-password --stdin` (одна строка — логин). Предыдущая ссылка отменяется, пароль и сессии меняются только при использовании новой ссылки. Ссылку нельзя сохранять в общедоступных логах. Bootstrap существующего администратора не сбрасывает. Публичного сброса пароля нет.
 
 В профиле доступны смена собственного пароля с проверкой текущего и выход. После смены пароля необходимо войти заново на всех устройствах. Сессии сохраняются после перезагрузки страницы и перезапуска сервера, имеют абсолютный срок (без продления на запросах) и максимум 20 сессий на пользователя. В БД находятся только SHA-256-хеши 256-битных случайных идентификаторов и одноразовых токенов. Пароли хешируются Argon2id (19 MiB, 2 прохода, parallelism 1), в отдельном блокирующем пуле с максимум 4 одновременными операциями.
 
-`auth.session_ttl_seconds`: 60–2592000; `auth.invitation_ttl_seconds`: 60–604800. `auth.public_origin` — точный внешний origin без пути и завершающего `/`. HTTP разрешён только на loopback для разработки; production требует HTTPS. Cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age`; для HTTPS — `Secure` и имя `__Host-veruna_session` без Domain. Для HTTP разработки используется `veruna_session`.
+`auth.session_ttl_seconds`: 60–2592000; `auth.invitation_ttl_seconds`: 60–604800. `auth.public_origin` и `download.public_base_url` по умолчанию пусты: origin панели, приглашения, манифесты и Tauri используют домен текущего запроса. Необязательное явное значение задаёт фиксированный HTTPS origin без пути и завершающего `/`, например для отдельного домена скачиваний. HTTP разрешён только на loopback для разработки; production требует HTTPS. Cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age`; для HTTPS — `Secure` и имя `__Host-veruna_session` без Domain. Для HTTP разработки используется `veruna_session`.
 
 Изменяющие запросы требуют совпадающего `Origin` и `X-Veruna-Request: 1`; аутентифицированные — также `X-CSRF-Token` из login/me. CSRF-токен живёт только в памяти UI, cookie недоступна JavaScript. CORS отсутствует. Вход ограничен пятью неудачными/выполняющимися попытками на нормализованный логин за 5 минут и общим пределом 100 за 5 минут. Успешные попытки освобождают лимит. Лимиты сохраняются в SQLite при перезапуске. Общий лимит консервативен для небольшой команды; при массовой атаке вход может временно ограничиваться для всех.
 
@@ -212,7 +228,7 @@ Dropdown пользователя позволяет изменить роль, 
 
 ### Reverse proxy
 
-Приложение не выводит защищённость соединения или адрес клиента из `Forwarded`/`X-Forwarded-*`. Cookie и CSRF основаны на `auth.public_origin`, поэтому произвольные proxy headers ничего не меняют. Backend слушает loopback и должен быть доступен только reverse proxy. Пример Nginx внутри HTTPS server с настроенными сертификатами:
+В автоматическом режиме домен берётся из проверенного `Host`, а HTTPS — из единственного `X-Forwarded-Proto`, только если TCP-соединение пришло с loopback IP. `Forwarded` и `X-Forwarded-Host` игнорируются. Публичный домен без подтверждённого HTTPS отклоняется; прямой HTTP разрешён только для loopback-адресов. Origin/custom-header/CSRF-проверки сохраняются. Backend слушает loopback и должен быть доступен только reverse proxy; proxy обязан перезаписывать `Host` и `X-Forwarded-Proto`. При proxy на другой машине задайте фиксированные URL в TOML. Пример Nginx внутри HTTPS server с настроенными сертификатами:
 
 ```nginx
 location / {
@@ -224,7 +240,7 @@ location / {
 }
 ```
 
-Не переписывайте браузерный `Origin` на стороне proxy. Включите перенаправление HTTP → HTTPS и защиту TLS/HSTS на reverse proxy. Внешний адрес и `auth.public_origin` должны совпадать. Для Vite укажите `http://127.0.0.1:5173` в конфигурации backend.
+Не переписывайте браузерный `Origin` на стороне proxy. Включите перенаправление HTTP → HTTPS и защиту TLS/HSTS на reverse proxy. В автоматическом режиме дополнительные переменные с доменом не нужны. Если задан явный `auth.public_origin`, он должен совпадать с внешним адресом. Для Vite укажите `http://127.0.0.1:5173` в конфигурации backend.
 
 ### HTTP API этапа 2
 

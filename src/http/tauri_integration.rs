@@ -3,7 +3,7 @@ use crate::services::sessions::Identity;
 use axum::{
     Extension, Json, Router,
     extract::{
-        Path, Query, State,
+        Path, Query,
         rejection::{JsonRejection, PathRejection, QueryRejection},
     },
     http::StatusCode,
@@ -54,21 +54,21 @@ async fn details(
     ))
 }
 async fn settings(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 1]>, PathRejection>,
     query: Result<Query<SettingsQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     details(state, path, query, false).await
 }
 async fn readiness(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 1]>, PathRejection>,
     query: Result<Query<SettingsQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     details(state, path, query, true).await
 }
 async fn save(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 1]>, PathRejection>,
     payload: Result<Json<SettingsRequest>, JsonRejection>,

@@ -29,16 +29,14 @@ def main():
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         base = f"http://127.0.0.1:{port}"
-        environment = {key: value for key, value in os.environ.items() if not key.startswith("VERUNA_")}
+        environment = {key: value for key, value in os.environ.items() if key != "CONFIG" and not key.startswith(("VERUNA_", "SERVER__", "DATABASE__", "STORAGE__", "LOGGING__", "AUTH__", "DOWNLOAD__"))}
         environment.update({
-            "VERUNA__SERVER__BIND": f"127.0.0.1:{port}",
-            "VERUNA__SERVER__OPEN_BROWSER": "false",
-            "VERUNA__SERVER__AUTO_PORT": "false",
-            "VERUNA__AUTH__PUBLIC_ORIGIN": base,
-            "VERUNA__DOWNLOAD__PUBLIC_BASE_URL": base,
-            "VERUNA__DATABASE__PATH": str(root / "state/db/releases.sqlite"),
-            "VERUNA__STORAGE__DIRECTORY": str(root / "storage/artifacts"),
-            "VERUNA__STORAGE__ICONS_DIRECTORY": str(root / "storage/icons"),
+            "SERVER__BIND": f"127.0.0.1:{port}",
+            "SERVER__OPEN_BROWSER": "false",
+            "SERVER__AUTO_PORT": "false",
+            "DATABASE__PATH": str(root / "state/db/releases.sqlite"),
+            "STORAGE__DIRECTORY": str(root / "storage/artifacts"),
+            "STORAGE__ICONS_DIRECTORY": str(root / "storage/icons"),
         })
         if os.name == "posix":
             environment["VERUNA_SMOKE_UNRELATED"] = os.fsdecode(b"\xff")
@@ -197,7 +195,7 @@ def main():
                                       input="owner\n", text=True, capture_output=True,
                                       cwd=root, env=environment, timeout=30)
             assert recovery.returncode == 0, recovery.stderr
-            recovery_url = next(line for line in recovery.stdout.splitlines() if line.startswith(base))
+            recovery_url = next(line for line in recovery.stdout.splitlines() if line.startswith("/admin/activate#token="))
             recovery_token = recovery_url.split("#token=")[1]
             secret_values.append(recovery_token)
             new_password = secrets.token_urlsafe(24)

@@ -11,8 +11,9 @@ pub async fn bind(config: &mut AppConfig) -> Result<TcpListener> {
     let origin = format!("http://{requested}");
     // External origins (reverse proxy, Vite) require a stable upstream port.
     let local = requested.ip().is_loopback()
-        && config.auth.public_origin == origin
-        && config.download.public_base_url == origin;
+        && (config.auth.public_origin.is_empty() || config.auth.public_origin == origin)
+        && (config.download.public_base_url.is_empty()
+            || config.download.public_base_url == origin);
     let listener = match TcpListener::bind(requested).await {
         Ok(listener) => listener,
         Err(error) if error.kind() == ErrorKind::AddrInUse && config.server.auto_port && local => {
@@ -27,17 +28,22 @@ pub async fn bind(config: &mut AppConfig) -> Result<TcpListener> {
     config.server.bind = address;
     if local {
         let origin = format!("http://{address}");
-        config.auth.public_origin = origin.clone();
-        config.download.public_base_url = origin;
+        if !config.auth.public_origin.is_empty() {
+            config.auth.public_origin = origin.clone();
+        }
+        if !config.download.public_base_url.is_empty() {
+            config.download.public_base_url = origin;
+        }
     }
     Ok(listener)
 }
 
 pub fn browser_url(config: &AppConfig) -> Option<String> {
+    let local = format!("http://{}", config.server.bind);
     (config.server.open_browser
         && config.server.bind.ip().is_loopback()
-        && config.auth.public_origin == format!("http://{}", config.server.bind))
-    .then(|| format!("{}/admin", config.auth.public_origin))
+        && (config.auth.public_origin.is_empty() || config.auth.public_origin == local))
+        .then(|| format!("{local}/admin"))
 }
 
 /// Launch the OS browser without a shell; an unavailable desktop must not stop HTTP.

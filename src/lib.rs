@@ -61,6 +61,7 @@ pub async fn application_state(
         config.download.clone(),
     );
     Ok(http::AppState {
+        server_bind: config.server.bind,
         tauri_integration: services::tauri_integration::TauriIntegration::new(
             repositories::applications::ApplicationsRepository::new(database.clone()),
             distribution.clone(),

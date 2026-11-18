@@ -35,7 +35,7 @@ function Diagnostics({ application, settings }: {application: Application; setti
         const expected = preview.state === 'available' ? 200 : preview.state === 'no_update' ? 204 : null;
         setNetwork({ok: valid && response.status === expected, text: `Публичный endpoint: HTTP ${response.status}.${valid && response.status === expected ? ' Ответ соответствует preview.' : ' Ответ не соответствует preview; проверьте сервер, proxy и актуальность канала.'}`});
       } catch {
-        if (!c.signal.aborted) setNetwork({ok: false, text: 'Серверный endpoint недоступен из браузера. Проверьте download.public_base_url, DNS, TLS, reverse proxy и CORS при другом origin.'});
+        if (!c.signal.aborted) setNetwork({ok: false, text: 'Серверный endpoint недоступен из браузера. Проверьте домен, DNS, TLS и reverse proxy.'});
       }
     } catch (e) { if (!c.signal.aborted) setError(e instanceof ApiError && e.code === 'invalid_release' ? 'Укажите корректный SemVer установленного клиента, например 1.0.0.' : errorMessage(e)); }
     finally { if (!c.signal.aborted) setBusy(false); }
@@ -123,7 +123,7 @@ export default function TauriIntegration({ application, administrator }: {applic
       <Verify>Сохраните содержимое .key.pub и откройте следующий шаг. Конфигурация должна содержать именно этот ключ. Сервер проверяет формат ключа, но не его соответствие пакетам.</Verify>
     </Space>,
     <Space orientation="vertical" className="full-width" key="config">
-      <Typography.Paragraph>Объедините фрагмент с существующим src-tauri/tauri.conf.json. Сохраните productName, version, identifier и прочие параметры. Адрес ниже получен из серверного download.public_base_url.</Typography.Paragraph>
+      <Typography.Paragraph>Объедините фрагмент с существующим src-tauri/tauri.conf.json. Сохраните productName, version, identifier и прочие параметры. Адрес ниже использует текущий домен или явно настроенный адрес скачиваний.</Typography.Paragraph>
       {settings.configuration ? <CodeBlock title="Фрагмент tauri.conf.json" language="json" code={JSON.stringify(settings.configuration, null, 2)} /> : <Alert type="warning" showIcon title="Не настроен публичный ключ" description="Сохраните настоящий .key.pub на шаге 2 — после этого появится готовый JSON. Endpoint уже показан вверху страницы." />}
       <Alert type="info" showIcon title={`Канал сборки: ${channel}`} description="Переключатель Stable / Beta меняет endpoint примера. Статическая конфигурация фиксирует канал на этапе сборки; смена релиза на сервере не переключает установленный клиент между stable и beta. Runtime-вариант — в расширенной части шага 4." />
       <Verify>Проверьте JSON, публичный ключ, HTTPS и slug. Оставьте переменные {'{{target}}'}, {'{{arch}}'} и {'{{current_version}}'} без подстановки: их заполнит Tauri.</Verify>

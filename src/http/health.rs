@@ -1,4 +1,4 @@
-use axum::{Json, extract::State};
+use axum::{Extension, Json};
 use serde::Serialize;
 
 use super::{AppState, error::ApiError};
@@ -11,7 +11,7 @@ pub struct HealthResponse {
     version: &'static str,
 }
 
-pub async fn get(State(state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
+pub async fn get(Extension(state): Extension<AppState>) -> Result<Json<HealthResponse>, ApiError> {
     services::health::check(&state.database)
         .await
         .map_err(|error| {

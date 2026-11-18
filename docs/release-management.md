@@ -89,7 +89,7 @@ curl -i -H 'If-None-Match: W/"полученный-хеш"' \
 
 В **Манифесты → Tauri Updater preview** задайте канал, платформу и текущую версию клиента. Причины: empty_channel, application_not_public, version_not_newer, updater_package_missing, signature_missing, ambiguous_package, artifact_corrupted или update_available. При успехе state=available, public_downloads_available=true, response содержит реальный Tauri JSON. Preview возвращает 200 с диагностикой, неверный SemVer/target — 422.
 
-Публичный endpoint `/api/v1/updates/tauri/{slug}/{channel}/{target}/{arch}/{currentVersion}` возвращает 200 с реальным URL и .sig либо 204 без тела. Downgrade не предлагается. Источник абсолютных ссылок — download.public_base_url, не Host. Инструкция клиента/сборки: [Tauri](integrations/tauri.md).
+Публичный endpoint `/api/v1/updates/tauri/{slug}/{channel}/{target}/{arch}/{currentVersion}` возвращает 200 с реальным URL и .sig либо 204 без тела. Downgrade не предлагается. Абсолютные ссылки используют текущий HTTPS-домен или явный download.public_base_url. Инструкция клиента/сборки: [Tauri](integrations/tauri.md).
 
 ## Примеры для продуктов
 

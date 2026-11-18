@@ -67,7 +67,7 @@ python3 scripts/smoke.py
 - Сохраняй проверку статуса и срока сессии на backend; роль в клиенте не является источником прав. Для mutations повторно проверяй actor/session в транзакции.
 - Токены и сессии — только хеши в БД. Пароли — Argon2id в ограниченном spawn_blocking. Не принимай пароли через аргументы CLI.
 - Локальный owner recovery (`recover_administrator_from_console`) не подключай к HTTP: API восстановления требует действующего admin.
-- Не ослабляй Origin/custom-header/CSRF-проверки. Proxy headers не являются доверенным источником HTTPS; используй auth.public_origin.
+- Не ослабляй Origin/custom-header/CSRF-проверки. В автоматическом режиме HTTPS определяет только X-Forwarded-Proto от loopback TCP peer; Forwarded и X-Forwarded-Host игнорируются. Явный auth.public_origin сохраняет фиксированный режим.
 - Не логируй фактические URL с токенами, query string, cookie, тела или секреты. Одноразовые ссылки используют fragment.
 - Сохраняй DB-инвариант последнего активного администратора и атомарное потребление токенов. Изменения пароля/статуса/роли должны отзывать сессии.
 - Проверяй конкурентные изменения и HTTP-границы; не заменяй их только тестами скрытых кнопок React.
@@ -76,6 +76,6 @@ python3 scripts/smoke.py
 
 - Разрешение current — только PublicDistribution.current и явный указатель существующего канала; выбор артефакта — общий select_artifact. Не выбирай максимальную версию отдельно в handlers/updater.
 - Все публичные download проходят PublicDistribution и delivery; не обходи public/active/published/membership/ownership проверки даже для HEAD/304/Range. Beta выбирается явно.
-- URL строятся от download.public_base_url, никогда от Host/Forwarded. /latest — 307/no-store; файлам не назначай долгие публичные TTL.
+- URL строятся от download.public_base_url, разрешённого для текущего запроса в HTTP middleware: по умолчанию проверенный Host и HTTPS от loopback proxy, необязательный явный URL имеет приоритет. Не сохраняй домен запроса в общем состоянии. /latest — 307/no-store; файлам не назначай долгие публичные TTL.
 - Полный SHA-256 выполняется при хранении/публикации и явной проверке. Публичные запросы проверяют key/regular-file/no-symlink/size без повторного чтения гигабайтов.
 - Nginx alias только internal, disable_symlinks on, доверенный storage key. Конфигурацию проверяет scripts/smoke_nginx.py; у Nginx нет прав записи.

@@ -99,7 +99,7 @@ pub struct TauriResponse {
     pub notes: String,
 }
 /// The distribution adapter supplies the permanent path for this exact artifact.
-/// This cannot be called with an HTTP Host header or an arbitrary external URL.
+/// The origin must be resolved and validated at the HTTP/configuration boundary.
 pub fn response(
     selection: &UpdateSelection,
     public_origin: &str,

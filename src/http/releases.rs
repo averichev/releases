@@ -6,7 +6,7 @@ use crate::{
 use axum::{
     Extension, Json, Router,
     extract::{
-        DefaultBodyLimit, Path, Query, State,
+        DefaultBodyLimit, Path, Query,
         rejection::{JsonRejection, PathRejection, QueryRejection},
     },
     http::StatusCode,
@@ -126,7 +126,7 @@ pub(super) fn ids<const N: usize>(
     Ok(values)
 }
 async fn list(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 1]>, PathRejection>,
     query: Result<Query<ListRequest>, QueryRejection>,
 ) -> Result<Json<PageDto>, ApiError> {
@@ -171,7 +171,7 @@ async fn list(
     }))
 }
 async fn create(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 1]>, PathRejection>,
     payload: Result<Json<CreateRequest>, JsonRejection>,
@@ -198,14 +198,14 @@ async fn create(
     ))
 }
 async fn get_one(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 2]>, PathRejection>,
 ) -> Result<Json<ReleaseDto>, ApiError> {
     let [app, id] = ids(path)?;
     Ok(Json(state.releases.get(&app, &id).await?.into()))
 }
 async fn update(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 2]>, PathRejection>,
     payload: Result<Json<Changes>, JsonRejection>,
@@ -230,7 +230,7 @@ async fn update(
     ))
 }
 async fn delete(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 2]>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {

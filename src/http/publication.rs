@@ -7,7 +7,7 @@ use axum::{
     Extension, Json, Router,
     body::Bytes,
     extract::{
-        DefaultBodyLimit, Path, Query, State,
+        DefaultBodyLimit, Path, Query,
         rejection::{BytesRejection, JsonRejection, PathRejection, QueryRejection},
     },
     http::{HeaderMap, StatusCode, header},
@@ -86,7 +86,7 @@ struct SwitchRequest {
     expected_release_revision: i64,
 }
 async fn channels(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 1]>, PathRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let [app] = ids(path)?;
@@ -101,7 +101,7 @@ async fn channels(
     )))
 }
 async fn validate(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 2]>, PathRejection>,
     payload: Result<Json<ChannelRequest>, JsonRejection>,
@@ -117,7 +117,7 @@ async fn validate(
     ))
 }
 async fn publish(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 2]>, PathRejection>,
     payload: Result<Json<PublishRequest>, JsonRejection>,
@@ -158,7 +158,7 @@ fn channel_path(
     Ok((app, channel))
 }
 async fn switch(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 2]>, PathRejection>,
     payload: Result<Json<SwitchRequest>, JsonRejection>,
@@ -191,7 +191,7 @@ struct HistoryQuery {
     before: Option<i64>,
 }
 async fn history(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 1]>, PathRejection>,
     query: Result<Query<HistoryQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
@@ -210,7 +210,7 @@ pub(super) struct ManifestQuery {
     limit: Option<u32>,
 }
 async fn manifest_preview(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 2]>, PathRejection>,
     query: Result<Query<ManifestQuery>, QueryRejection>,
 ) -> Result<Json<crate::services::manifest::Manifest>, ApiError> {
@@ -227,7 +227,7 @@ async fn manifest_preview(
     ))
 }
 pub async fn public_manifest(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ManifestQuery>, QueryRejection>,
     headers: HeaderMap,
@@ -273,7 +273,7 @@ struct TauriRequest {
     current_version: String,
 }
 async fn tauri_preview(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 1]>, PathRejection>,
     payload: Result<Json<TauriRequest>, JsonRejection>,
 ) -> Result<Json<crate::services::updater::TauriPreview>, ApiError> {
@@ -292,7 +292,7 @@ struct UpdaterRole {
     distribution_role: String,
 }
 async fn updater_role(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 3]>, PathRejection>,
     payload: Result<Json<UpdaterRole>, JsonRejection>,
@@ -315,7 +315,7 @@ async fn updater_role(
     ))
 }
 async fn signature(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 3]>, PathRejection>,
     bytes: Result<Bytes, BytesRejection>,
@@ -337,7 +337,7 @@ async fn signature(
     ))
 }
 async fn delete_signature(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 3]>, PathRejection>,
 ) -> Result<Json<super::artifacts::ArtifactDto>, ApiError> {

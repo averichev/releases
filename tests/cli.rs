@@ -13,8 +13,8 @@ async fn bootstrap_and_owner_recovery_are_independent_and_do_not_echo_passwords(
         let mut command = Command::new(env!("CARGO_BIN_EXE_veruna-releases"));
         command
             .env_clear()
-            .env("VERUNA__DATABASE__PATH", &database)
-            .env("VERUNA__STORAGE__DIRECTORY", &artifacts)
+            .env("DATABASE__PATH", &database)
+            .env("STORAGE__DIRECTORY", &artifacts)
             .current_dir(directory.path());
         command
     };
@@ -70,7 +70,10 @@ async fn bootstrap_and_owner_recovery_are_independent_and_do_not_echo_passwords(
             String::from_utf8_lossy(&output.stderr)
         );
         let stdout = String::from_utf8(output.stdout).unwrap();
-        let url = stdout.lines().find(|s| s.starts_with("http://")).unwrap();
+        let url = stdout
+            .lines()
+            .find(|s| s.starts_with("/admin/activate#"))
+            .unwrap();
         let token = url.split("#token=").nth(1).unwrap().to_owned();
         assert!(!String::from_utf8_lossy(&output.stderr).contains(&token));
         links.push(token);

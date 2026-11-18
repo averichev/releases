@@ -7,16 +7,16 @@
 1. В настройках приложения выберите **Публичное**, убедитесь, что оно активно. Private/archived возвращают одинаковый 404 на всех публичных маршрутах, включая условные запросы.
 2. В **Распространение** задайте платформу, формат и назначение installer по умолчанию, например `windows-x86_64 / exe / installer`. Настройка относится к приложению, не меняет опубликованные артефакты. При отсутствии выбранного файла проверка публикации показывает предупреждение.
 3. Создайте черновик, загрузите реальные файлы. Для updater назначьте роль и загрузите соответствующую `.sig`. Выполните проверку готовности и опубликуйте в stable или beta. При исправлении опубликованного файла создавайте новую версию.
-4. Задайте `download.public_base_url`: это источник всех абсолютных ссылок, Host/Forwarded клиента не используются. `auth.public_origin` отдельно задаёт origin браузерной панели/CSRF.
+4. Привяжите HTTPS-домен через локальный reverse proxy. Домен панели, манифестов и updater определяется автоматически из проверенного Host; HTTPS подтверждается X-Forwarded-Proto только от loopback TCP peer. «Мой хост» передаёт эти заголовки автоматически. Явные `download.public_base_url` и `auth.public_origin` нужны только для фиксированных адресов особого развёртывания.
 
 ```toml
 [download]
-public_base_url = "https://apps.veruna.systems"
+# public_base_url = "https://downloads.example.com" # необязательный отдельный домен
 delivery_mode = "direct" # или nginx с конфигурацией deploy/nginx
 max_concurrent_downloads = 64
 ```
 
-Встроенный default — `http://127.0.0.1:8080`, direct, 64 одновременных потоков. URL должен быть HTTPS origin без пути/trailing slash/credentials/query; HTTP разрешён только на loopback. Переменные: `VERUNA__DOWNLOAD__PUBLIC_BASE_URL`, `VERUNA__DOWNLOAD__DELIVERY_MODE`, `VERUNA__DOWNLOAD__MAX_CONCURRENT_DOWNLOADS`. При загрузке файлов больше 2 GiB увеличьте также `storage.max_file_bytes`, `storage.max_request_bytes` и лимит reverse proxy.
+По умолчанию URL определяется из текущего запроса; delivery — direct, 64 одновременных потока. URL должен быть HTTPS origin без пути/trailing slash/credentials/query; HTTP разрешён только на loopback. Переменные: `DOWNLOAD__PUBLIC_BASE_URL`, `DOWNLOAD__DELIVERY_MODE`, `DOWNLOAD__MAX_CONCURRENT_DOWNLOADS`. При загрузке файлов больше 2 GiB увеличьте также `storage.max_file_bytes`, `storage.max_request_bytes` и лимит reverse proxy.
 
 ## Маршруты
 

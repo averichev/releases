@@ -7,7 +7,7 @@ use axum::{
     Extension, Json, Router,
     body::Body,
     extract::{
-        DefaultBodyLimit, Path, Request, State,
+        DefaultBodyLimit, Path, Request,
         multipart::{Field, MultipartError},
         rejection::PathRejection,
     },
@@ -78,7 +78,7 @@ struct OptionsDto {
     max_file_bytes: u64,
     upload_idle_seconds: u64,
 }
-async fn options(State(state): State<AppState>) -> Json<OptionsDto> {
+async fn options(Extension(state): Extension<AppState>) -> Json<OptionsDto> {
     Json(OptionsDto {
         targets: artifact::TARGETS,
         file_types: artifact::FILE_TYPES,
@@ -87,7 +87,7 @@ async fn options(State(state): State<AppState>) -> Json<OptionsDto> {
     })
 }
 async fn list(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 2]>, PathRejection>,
 ) -> Result<Json<Vec<ArtifactDto>>, ApiError> {
     let [app, release] = ids(path)?;
@@ -123,7 +123,7 @@ async fn text(field: &mut Field<'_>, idle: Duration) -> Result<String, ApiError>
     String::from_utf8(bytes).map_err(|_| ApiError::InvalidArtifact)
 }
 async fn upload(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 2]>, PathRejection>,
     request: Request,
@@ -193,7 +193,7 @@ async fn upload(
     Ok((StatusCode::CREATED, Json(result.into())))
 }
 async fn download(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     path: Result<Path<[String; 3]>, PathRejection>,
 ) -> Result<Response, ApiError> {
     let [app, release, id] = ids(path)?;
@@ -225,7 +225,7 @@ async fn download(
         .into_response())
 }
 async fn remove(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 3]>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {
@@ -238,7 +238,7 @@ struct VerificationDto {
     valid: bool,
 }
 async fn verify(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 3]>, PathRejection>,
 ) -> Result<Json<VerificationDto>, ApiError> {
