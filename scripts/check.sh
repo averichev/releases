@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 cd "$(dirname "$0")/.."
+python3 -m unittest discover -s scripts -p 'test_*.py'
 npm --prefix frontend ci
 npm --prefix frontend run build
 npm --prefix frontend test

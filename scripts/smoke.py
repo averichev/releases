@@ -84,6 +84,8 @@ def main():
 
             health, _ = call("/api/v1/health?token=not-for-logs")
             assert health["status"] == "ok" and health["service"] == "veruna-releases"
+            if len(sys.argv) > 2:
+                assert health["version"] == sys.argv[2], (health["version"], sys.argv[2])
             html, headers = call("/admin/users")
             assert headers["Content-Type"].startswith("text/html")
             assets = re.findall(r'(?:src|href)="(/[^\"]+)"', html.decode())

@@ -21,6 +21,6 @@ pub async fn get(Extension(state): Extension<AppState>) -> Result<Json<HealthRes
     Ok(Json(HealthResponse {
         status: "ok",
         service: "veruna-releases",
-        version: env!("CARGO_PKG_VERSION"),
+        version: crate::VERSION,
     }))
 }

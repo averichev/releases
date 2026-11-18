@@ -7,6 +7,9 @@ pub mod infrastructure;
 pub mod repositories;
 pub mod services;
 
+/// Release builds use the calculated Git version; ordinary builds use Cargo's version.
+pub const VERSION: &str = env!("APP_VERSION");
+
 use anyhow::Result;
 use sqlx::SqlitePool;
 

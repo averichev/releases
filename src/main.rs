@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
     let database = veruna_releases::initialize(&config).await?;
     let listener = startup::bind(&mut config).await?;
     let state = veruna_releases::application_state(database.clone(), &config).await?;
-    tracing::info!(address = %listener.local_addr()?, version = env!("CARGO_PKG_VERSION"), "Veruna Releases started");
+    tracing::info!(address = %listener.local_addr()?, version = veruna_releases::VERSION, "Veruna Releases started");
 
     let grace = Duration::from_secs(config.server.shutdown_timeout_seconds);
     let (stop, stopped) = oneshot::channel::<()>();

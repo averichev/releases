@@ -60,7 +60,7 @@ async fn health_checks_database_and_returns_safe_errors() {
     let json: Value = serde_json::from_slice(&body(response).await).unwrap();
     assert_eq!(
         json,
-        serde_json::json!({"status":"ok", "service":"veruna-releases", "version": env!("CARGO_PKG_VERSION")})
+        serde_json::json!({"status":"ok", "service":"veruna-releases", "version": veruna_releases::VERSION})
     );
     pool.close().await;
     let response = request(&router, Method::GET, "/api/v1/health").await;
