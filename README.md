@@ -255,8 +255,13 @@ Dropdown пользователя позволяет изменить роль, 
 В автоматическом режиме домен берётся из проверенного `Host`, а HTTPS — из единственного `X-Forwarded-Proto`, только если TCP-соединение пришло с loopback IP. `Forwarded` и `X-Forwarded-Host` игнорируются. Публичный домен без подтверждённого HTTPS отклоняется; прямой HTTP разрешён только для loopback-адресов. Origin/custom-header/CSRF-проверки сохраняются. Backend слушает loopback и должен быть доступен только reverse proxy; proxy обязан перезаписывать `Host` и `X-Forwarded-Proto`. При proxy на другой машине задайте фиксированные URL в TOML. Пример Nginx внутри HTTPS server с настроенными сертификатами:
 
 ```nginx
+# Внутри HTTPS server: 2 GiB на файл + 1 MiB на multipart.
+client_max_body_size 2049m;
 location / {
     proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_request_buffering off;
+    proxy_read_timeout 180s;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $remote_addr;
@@ -265,6 +270,8 @@ location / {
 ```
 
 Не переписывайте браузерный `Origin` на стороне proxy. Включите перенаправление HTTP → HTTPS и защиту TLS/HSTS на reverse proxy. В автоматическом режиме дополнительные переменные с доменом не нужны. Если задан явный `auth.public_origin`, он должен совпадать с внешним адресом. Для Vite укажите `http://127.0.0.1:5173` в конфигурации backend.
+
+Лимит в форме загрузки приходит от backend и не учитывает ограничения внешних прокси. Если файл меньше указанного размера, но загрузка получает HTTP 413, проверьте `client_max_body_size` в действующем `server`/`location` именно этого домена и лимиты других прокси перед ним. Nginx может отклонить запрос до backend и вернуть HTML; панель определяет такую ошибку по HTTP-статусу. После изменения конфигурации проверьте `nginx -t` и перезагрузите Nginx. Полный пример: [deploy/nginx/veruna.conf](deploy/nginx/veruna.conf).
 
 ### HTTP API этапа 2
 

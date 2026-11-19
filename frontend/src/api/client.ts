@@ -26,15 +26,27 @@ const messages: Record<string, string> = {
   invalid_updater: 'Нужен совместимый updater-пакет и корректный файл .sig от Tauri. Приватные ключи не принимаются.',
   invalid_artifact: 'Проверьте имя файла, платформу и формат. Для файла без расширения укажите формат явно.',
   artifact_exists: 'Файл для этой платформы и формата уже есть. Сначала удалите его или выберите другую комбинацию.',
-  payload_too_large: 'Размер файла или запроса превышает серверный лимит.',
+  payload_too_large: 'Загрузка отклонена: превышен лимит размера файла или запроса (HTTP 413). Если файл меньше указанного лимита, администратору сервера нужно проверить лимит прокси (Nginx).',
   upload_timeout: 'Передача прервалась из-за длительного отсутствия данных. Повторите загрузку.',
   storage_full: 'На сервере закончилось место. Обратитесь к администратору сервера.',
   storage_unavailable: 'Файл в хранилище отсутствует или повреждён. Требуется проверка сервера.',
   storage_busy: 'Сервер обрабатывает другие файлы. Повторите позже.',
   invalid_icon: 'Выберите PNG, JPEG или WebP до 2 МиБ, не более 1024×1024 пикселей.',
 };
+const httpMessages: Partial<Record<number, string>> = {
+  401: messages.unauthorized,
+  403: messages.forbidden,
+  404: 'Запрошенный ресурс не найден (HTTP 404). Обновите страницу.',
+  408: 'Сервер прервал запрос из-за длительного ожидания данных (HTTP 408). Повторите запрос.',
+  413: messages.payload_too_large,
+  500: 'Внутренняя ошибка сервера (HTTP 500). Обратитесь к администратору сервера.',
+  502: 'Прокси не получил корректный ответ сервера (HTTP 502). Обратитесь к администратору сервера.',
+  503: 'Сервис временно недоступен (HTTP 503). Повторите запрос позже.',
+  504: 'Прокси не дождался ответа сервера (HTTP 504). Обновите данные перед повторным действием.',
+  507: messages.storage_full,
+};
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, public details?: unknown) { super(messages[code] ?? 'Не удалось выполнить запрос. Повторите позже.'); }
+  constructor(public status: number, public code: string, public details?: unknown) { super(messages[code] ?? httpMessages[status] ?? `Не удалось выполнить запрос (HTTP ${status}). Обратитесь к администратору сервера.`); }
 }
 export async function api<T>(path: string, method = 'GET', data?: unknown, signal?: AbortSignal, timeoutMs = 15000): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -63,7 +75,7 @@ export const errorMessage = (error: unknown) => error instanceof Error ? error.m
 function responseError(status: number, payload: unknown, path: string, requestCsrf?: string) {
   const code = typeof payload === 'object' && payload !== null && 'error' in payload &&
     typeof payload.error === 'object' && payload.error !== null && 'code' in payload.error && typeof payload.error.code === 'string'
-    ? payload.error.code : 'internal_error';
+    ? payload.error.code : 'http_error';
   if (status === 401 && code !== 'invalid_credentials' && path !== '/auth/me' && requestCsrf === csrfToken) window.dispatchEvent(new Event('session-expired'));
   return new ApiError(status, code, payload);
 }

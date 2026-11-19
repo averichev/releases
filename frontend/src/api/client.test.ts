@@ -34,3 +34,10 @@ it('uploads icon bytes with the session CSRF headers', async () => {
   expect(init.headers).toMatchObject({ 'Content-Type': 'image/png', 'X-CSRF-Token': 'icon-csrf', 'X-Veruna-Request': '1' });
   setCsrf();
 });
+
+it('explains a proxy size rejection returned as HTML for a fetch upload', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>413 Request Entity Too Large</html>', { status: 413 })));
+  await expect(api('/admin/applications/id/icon', 'POST', new Blob(['image']))).rejects.toMatchObject({
+    status: 413, message: expect.stringMatching(/HTTP 413.*лимит прокси/),
+  });
+});

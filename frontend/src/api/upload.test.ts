@@ -18,6 +18,20 @@ it('supports cancellation and preserves API errors', async () => {
   const failed = upload('/admin/files', new FormData(), new AbortController().signal, vi.fn()); Xhr.last.status = 413; Xhr.last.responseText = '{"error":{"code":"payload_too_large"}}'; Xhr.last.onload?.();
   await expect(failed).rejects.toBeInstanceOf(ApiError); await expect(failed).rejects.toMatchObject({ code: 'payload_too_large', status: 413 });
 });
+it.each([
+  [413, '<html><h1>413 Request Entity Too Large</h1></html>', /HTTP 413.*лимит прокси/],
+  [413, '', /HTTP 413.*лимит прокси/],
+  [413, '{broken json', /HTTP 413.*лимит прокси/],
+  [502, '<html>private upstream details</html>', /HTTP 502/],
+  [504, '', /HTTP 504.*Обновите данные/],
+  [599, '', /HTTP 599/],
+])('explains HTTP %i even without a JSON error envelope', async (status, body, message) => {
+  vi.stubGlobal('XMLHttpRequest', Xhr);
+  const failed = upload('/admin/files', new FormData(), new AbortController().signal, vi.fn());
+  Xhr.last.status = status; Xhr.last.responseText = body; Xhr.last.onload?.();
+  await expect(failed).rejects.toMatchObject({ status, code: 'http_error', message: expect.stringMatching(message) });
+  await expect(failed).rejects.not.toThrow('private upstream details');
+});
 it('expires the session on an upload 401 and ignores stale unauthorized results', async () => {
   vi.stubGlobal('XMLHttpRequest', Xhr); const listener = vi.fn(); window.addEventListener('session-expired', listener); setCsrf('old');
   const old = upload('/admin/files', new FormData(), new AbortController().signal, vi.fn()); setCsrf('new'); Xhr.last.status = 401; Xhr.last.responseText = '{"error":{"code":"unauthorized"}}'; Xhr.last.onload?.();
