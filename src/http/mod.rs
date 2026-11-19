@@ -15,7 +15,7 @@ mod upload_body;
 
 use axum::{
     Router,
-    http::{HeaderValue, header},
+    http::{HeaderValue, Method, header},
     routing::{any, get},
 };
 use sqlx::SqlitePool;
@@ -24,6 +24,7 @@ use tower_http::{
         CompressionLayer,
         predicate::{DefaultPredicate, NotForContentType, Predicate},
     },
+    cors::{Any, CorsLayer},
     set_header::SetResponseHeaderLayer,
     trace::{DefaultOnResponse, TraceLayer},
 };
@@ -51,18 +52,36 @@ pub struct AppState {
 }
 
 pub fn router(state: AppState) -> Router {
+    let resolve_origin = axum::middleware::from_fn_with_state(state.clone(), origin::resolve);
+    let api_cache = SetResponseHeaderLayer::overriding(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+    let public_distribution = Router::new()
+        .nest(
+            "/api/v1",
+            distribution::api_router().layer(api_cache.clone()),
+        )
+        .route("/{slug}/manifest.json", get(publication::public_manifest))
+        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
+        // Keep CORS outside origin resolution so its errors are readable too.
+        .layer(resolve_origin.clone())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET, Method::HEAD])
+                .allow_headers([header::IF_NONE_MATCH])
+                .expose_headers([header::ETAG]),
+        );
     let public = Router::new().route("/health", get(health::get));
     let v1 = public
         .nest("/auth", auth::router())
         .merge(admin::router(state.clone()))
-        .merge(distribution::api_router())
         .fallback(not_found);
-    let api = Router::new().nest("/v1", v1).fallback(not_found).layer(
-        SetResponseHeaderLayer::overriding(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("no-store"),
-        ),
-    );
+    let api = Router::new()
+        .nest("/v1", v1)
+        .fallback(not_found)
+        .layer(api_cache);
 
     Router::new()
         .merge(distribution::documents_router())
@@ -73,14 +92,14 @@ pub fn router(state: AppState) -> Router {
         .route("/favicon.ico", get(assets::serve))
         .route("/apple-touch-icon.png", get(assets::serve))
         .route("/index.html", get(assets::serve))
-        .route("/{slug}/manifest.json", get(publication::public_manifest))
         .route("/api", any(not_found))
         .nest("/api", api)
         .fallback(assets::serve)
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
-        .layer(axum::extract::DefaultBodyLimit::max(8192))
         .layer(axum::middleware::from_fn(auth::same_origin))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), origin::resolve))
+        .layer(resolve_origin)
+        .merge(public_distribution)
+        .layer(axum::extract::DefaultBodyLimit::max(8192))
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
         .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")))

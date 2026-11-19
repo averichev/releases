@@ -42,6 +42,25 @@ max_concurrent_downloads = 64
 
 `latest` содержит `{version,published_at,notes,artifacts}`; artifact содержит `{id,filename,target,format,purpose,size_bytes,sha256,download_url}`. `published_at` — RFC3339. Нет storage keys, путей, подписей, авторов или административных timestamps/revision. Приложение без публикаций доступно с latest=null и пустой историей. Beta-only файлы не появляются в stable API.
 
+## CORS
+
+Манифест `/{slug}/manifest.json`, публичное API `/api/v1/public/applications/{slug}` (включая `/releases` и `/icon`) и Tauri updater разрешают чтение с любого домена: `Access-Control-Allow-Origin: *`, методы GET/HEAD, без credentials. OPTIONS обслуживает preflight; разрешён заголовок `If-None-Match` для условного запроса манифеста. `ETag` доступен JavaScript через `Access-Control-Expose-Headers`. CORS сохраняется для 204, 304, 404 и остальных ошибок этих маршрутов; правила кеширования и проверки публичности действуют как обычно.
+
+Пример для страницы на `https://videolov.ru` или `https://factum.systems` (замените slug на нужное приложение):
+
+```js
+const response = await fetch(
+  'https://apps.veruna.systems/videolov/manifest.json',
+  { credentials: 'omit' },
+);
+if (!response.ok) throw new Error(`Manifest HTTP ${response.status}`);
+const etag = response.headers.get('ETag');
+const manifest = await response.json();
+console.log(manifest, etag);
+```
+
+При повторном fetch можно передать `headers: { 'If-None-Match': etag }`, если ETag получен; ответ 304 не содержит JSON, используйте ранее сохранённый манифест. Административное API и аутентификация CORS не разрешают; Origin/CSRF и cookie не меняются. Для обычной загрузки бинарного файла по ссылке CORS не требуется.
+
 ## Выбор файла
 
 Фильтры `target`, `format`, `purpose` применяются первыми, purpose по умолчанию installer. После фильтрации один файл выбирается автоматически. При нескольких кандидатах применяется сохранённый селектор, если он однозначно совпал среди кандидатов. Если совпадения нет, ответ `409 ambiguous_artifact`; настройка не подменяет явно выбранную пользователем платформу. Без подходящего файла — 404. Неверный селектор — 422. User-Agent не участвует.

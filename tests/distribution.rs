@@ -213,6 +213,327 @@ fn signature() -> String {
         STANDARD.encode([0; 64])
     ))
 }
+
+const CORS_ORIGINS: [&str; 2] = ["https://videolov.ru", "https://factum.systems"];
+const CORS_PATHS: [&str; 5] = [
+    "/product/manifest.json",
+    "/api/v1/public/applications/product",
+    "/api/v1/public/applications/product/releases",
+    "/api/v1/public/applications/product/icon",
+    "/api/v1/updates/tauri/product/stable/windows/x86_64/0.0.0",
+];
+
+fn assert_public_cors(response: &Response) {
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    assert_eq!(response.headers()["access-control-expose-headers"], "etag");
+    assert!(
+        !response
+            .headers()
+            .contains_key("access-control-allow-credentials")
+    );
+    assert!(!response.headers().contains_key("set-cookie"));
+}
+
+fn assert_no_cors(response: &Response) {
+    assert!(
+        response
+            .headers()
+            .keys()
+            .all(|name| !name.as_str().starts_with("access-control-"))
+    );
+}
+
+#[tokio::test]
+async fn public_cors_preserves_get_head_manifest_etag_and_updater_no_content() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("1.0.0").await;
+    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.state
+        .artifacts
+        .set_updater(
+            &t.actor,
+            &t.app,
+            &r.id,
+            &a.id,
+            Some("updater"),
+            Some(Some(signature().as_bytes())),
+        )
+        .await
+        .unwrap();
+    let mut icon = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(2, 2)
+        .write_to(&mut icon, image::ImageFormat::Png)
+        .unwrap();
+    t.state
+        .applications
+        .set_icon(&t.actor, &t.app, Some(icon.into_inner()))
+        .await
+        .unwrap();
+    t.publish(&r, "stable").await;
+
+    for path in CORS_PATHS
+        .into_iter()
+        .chain(["/api/v1/updates/tauri/product/stable/windows/x86_64/1.0.0"])
+    {
+        let baseline = t.get("GET", path, &[]).await;
+        let status = baseline.status();
+        assert_eq!(status, if path.ends_with("/1.0.0") { 204 } else { 200 });
+        let headers = baseline.headers().clone();
+        assert_eq!(
+            headers["cache-control"],
+            if path.ends_with("manifest.json") {
+                "public, no-cache"
+            } else {
+                "no-store"
+            }
+        );
+        if status == StatusCode::OK {
+            assert_eq!(
+                headers["content-type"],
+                if path.ends_with("/icon") {
+                    "image/png"
+                } else {
+                    "application/json"
+                }
+            );
+        }
+        let body = bytes(baseline).await;
+        for origin in CORS_ORIGINS {
+            for method in ["GET", "HEAD"] {
+                let response = t.get(method, path, &[("origin", origin)]).await;
+                assert_eq!(response.status(), status, "{method} {path}");
+                assert_public_cors(&response);
+                for name in ["etag", "cache-control", "content-type"] {
+                    assert_eq!(response.headers().get(name), headers.get(name), "{path}");
+                }
+                if method == "HEAD" {
+                    assert!(bytes(response).await.is_empty());
+                } else {
+                    assert_eq!(bytes(response).await, body);
+                }
+            }
+        }
+    }
+    let manifest = t.get("GET", CORS_PATHS[0], &[]).await;
+    assert_eq!(manifest.headers()["content-type"], "application/json");
+    assert_eq!(manifest.headers()["cache-control"], "public, no-cache");
+    let etag = manifest.headers()["etag"].to_str().unwrap();
+    for origin in CORS_ORIGINS {
+        for method in ["GET", "HEAD"] {
+            let response = t
+                .get(
+                    method,
+                    CORS_PATHS[0],
+                    &[("origin", origin), ("if-none-match", etag)],
+                )
+                .await;
+            assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+            assert_public_cors(&response);
+            assert_eq!(response.headers()["etag"], etag);
+            assert_eq!(response.headers()["cache-control"], "public, no-cache");
+            assert!(bytes(response).await.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn public_cors_preflight_allows_only_read_methods_and_conditional_header() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    for origin in CORS_ORIGINS {
+        for path in CORS_PATHS {
+            for method in ["GET", "HEAD", "POST", "PUT", "DELETE"] {
+                let response = t
+                    .get(
+                        "OPTIONS",
+                        path,
+                        &[
+                            ("origin", origin),
+                            ("access-control-request-method", method),
+                            ("access-control-request-headers", "if-none-match"),
+                        ],
+                    )
+                    .await;
+                assert!(response.status().is_success(), "{path}");
+                assert_eq!(response.headers()["access-control-allow-origin"], "*");
+                assert_eq!(
+                    response.headers()["access-control-allow-methods"],
+                    "GET,HEAD"
+                );
+                assert_eq!(
+                    response.headers()["access-control-allow-headers"],
+                    "if-none-match"
+                );
+                assert!(
+                    !response
+                        .headers()
+                        .contains_key("access-control-allow-credentials")
+                );
+                assert!(bytes(response).await.is_empty());
+            }
+            for method in ["POST", "PUT", "DELETE"] {
+                let response = t.get(method, path, &[("origin", origin)]).await;
+                assert_eq!(response.status(), 405);
+                assert_public_cors(&response);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn public_cors_covers_errors_without_bypassing_visibility_or_storage_checks() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("1.0.0").await;
+    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.publish(&r, "stable").await;
+    for origin in CORS_ORIGINS {
+        for path in CORS_PATHS {
+            let response = t
+                .get(
+                    "GET",
+                    &path.replace("product", "missing"),
+                    &[("origin", origin)],
+                )
+                .await;
+            assert_eq!(response.status(), 404, "{path}");
+            assert_public_cors(&response);
+        }
+        for (path, status) in [
+            ("/product/manifest.json?unknown=1", 400),
+            ("/api/v1/public/applications/product?unknown=1", 400),
+            ("/api/v1/public/applications/product/releases?limit=0", 400),
+            (
+                "/api/v1/updates/tauri/product/stable/windows/x86_64/invalid",
+                422,
+            ),
+        ] {
+            let response = t.get("GET", path, &[("origin", origin)]).await;
+            assert_eq!(response.status(), status, "{path}");
+            assert_public_cors(&response);
+            assert_eq!(response.headers()["cache-control"], "no-store");
+            assert_eq!(response.headers()["content-type"], "application/json");
+        }
+    }
+    tokio::fs::remove_file(t.config.storage.directory.join(&a.storage_key))
+        .await
+        .unwrap();
+    for origin in CORS_ORIGINS {
+        for path in &CORS_PATHS[..3] {
+            let response = t.get("GET", path, &[("origin", origin)]).await;
+            assert_eq!(response.status(), 503, "{path}");
+            assert_public_cors(&response);
+        }
+    }
+    for visibility in [Visibility::Private, Visibility::Public] {
+        t.state
+            .applications
+            .update(
+                &t.actor,
+                &t.app,
+                ApplicationChanges {
+                    visibility: Some(visibility),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        if visibility == Visibility::Public {
+            t.state
+                .applications
+                .set_status(&t.actor, &t.app, Status::Archived)
+                .await
+                .unwrap();
+        }
+        for origin in CORS_ORIGINS {
+            for path in CORS_PATHS {
+                let response = t
+                    .get("GET", path, &[("origin", origin), ("if-none-match", "*")])
+                    .await;
+                assert_eq!(response.status(), 404, "{path}");
+                assert_public_cors(&response);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn cors_is_absent_from_admin_auth_downloads_and_unmatched_routes() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("1.0.0").await;
+    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.publish(&r, "stable").await;
+    let download = t.url(&r, &a, "stable");
+    let cookie = format!("veruna_session={}", t.token);
+    for origin in CORS_ORIGINS {
+        for (path, anonymous_status, authenticated_status) in [
+            ("/api/v1/admin/applications", 401, 200),
+            ("/api/v1/admin/missing", 401, 404),
+            ("/api/v1/auth/me", 401, 200),
+            ("/api/v1/health", 200, 200),
+            ("/api/v1/public/applications/product/missing", 404, 404),
+            ("/api/v1/updates/tauri/missing", 404, 404),
+            ("/product", 200, 200),
+            ("/product/latest", 307, 307),
+            (download.as_str(), 200, 200),
+        ] {
+            for (headers, status) in [
+                (vec![("origin", origin)], anonymous_status),
+                (
+                    vec![("origin", origin), ("cookie", cookie.as_str())],
+                    authenticated_status,
+                ),
+            ] {
+                let response = t.get("GET", path, &headers).await;
+                assert_eq!(response.status(), status, "{path}");
+                assert_no_cors(&response);
+            }
+            let response = t
+                .get(
+                    "OPTIONS",
+                    path,
+                    &[("origin", origin), ("access-control-request-method", "GET")],
+                )
+                .await;
+            assert!(!response.status().is_success(), "{path}");
+            assert_no_cors(&response);
+        }
+        for (path, headers) in [
+            (
+                "/api/v1/auth/login",
+                vec![("origin", origin), ("x-veruna-request", "1")],
+            ),
+            (
+                "/api/v1/auth/logout",
+                vec![
+                    ("origin", origin),
+                    ("cookie", cookie.as_str()),
+                    ("x-veruna-request", "1"),
+                    ("x-csrf-token", &secrets::csrf(&t.token)),
+                ],
+            ),
+        ] {
+            let response = t.get("POST", path, &headers).await;
+            assert_eq!(response.status(), 403);
+            assert_no_cors(&response);
+        }
+    }
+}
+
+#[tokio::test]
+async fn public_cors_also_wraps_automatic_origin_resolution_errors() {
+    let mut t = TestApp::new(DeliveryMode::Direct).await;
+    t.state.auth_config.public_origin.clear();
+    t.state.distribution.config.public_base_url.clear();
+    t.router = http::router(t.state.clone());
+    // TestApp::get uses an untrusted public Host over HTTP, rejected in auto mode.
+    for origin in CORS_ORIGINS {
+        for path in CORS_PATHS {
+            let response = t.get("GET", path, &[("origin", origin)]).await;
+            assert_eq!(response.status(), 400, "{path}");
+            assert_public_cors(&response);
+        }
+    }
+}
+
 #[tokio::test]
 async fn shared_resolution_selectors_defaults_and_channel_rollback() {
     let t = TestApp::new(DeliveryMode::Direct).await;
