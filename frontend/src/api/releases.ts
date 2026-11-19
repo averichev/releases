@@ -20,7 +20,7 @@ export function size(bytes: number) {
   const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
   return `${(bytes / 1024 ** unit).toLocaleString('ru-RU', { maximumFractionDigits: unit ? 2 : 0 })} ${['B', 'KiB', 'MiB', 'GiB'][unit]}`;
 }
-export const targetName = (value: string) => ({ 'windows-x86_64': 'Windows x64', 'windows-aarch64': 'Windows ARM64', 'linux-x86_64': 'Linux x64', 'linux-aarch64': 'Linux ARM64', 'darwin-x86_64': 'macOS x64', 'darwin-aarch64': 'macOS ARM64', any: 'Любая платформа' })[value] ?? value;
+export const targetName = (value: string) => ({ 'windows-x86_64': 'Windows x64', 'windows-aarch64': 'Windows ARM64', 'linux-x86_64': 'Linux x64', 'linux-aarch64': 'Linux ARM64', 'darwin-x86_64': 'macOS x64', 'darwin-aarch64': 'macOS ARM64', 'darwin-universal': 'macOS Universal (Intel + Apple Silicon)', any: 'Любая платформа' })[value] ?? value;
 // Backend remains authoritative, including u64 bounds of numeric components.
 export const validVersion = (value: string) => /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value.trim()) && value.trim().length <= 201;
 export function detectedType(filename: string) {

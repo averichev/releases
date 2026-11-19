@@ -79,7 +79,10 @@ curl -i -H 'If-None-Match: W/"полученный-хеш"' \
 | --- | --- | --- |
 | windows-x86_64 / windows-aarch64 | тот же OS-ARCH | EXE (NSIS) или MSI, явно назначенный updater |
 | linux-x86_64 / linux-aarch64 | тот же OS-ARCH | AppImage |
-| darwin-x86_64 / darwin-aarch64 | тот же OS-ARCH | app.tar.gz |
+| darwin-x86_64 / darwin-aarch64 | тот же OS-ARCH, затем darwin-universal | app.tar.gz |
+| darwin-universal | darwin-universal | app.tar.gz |
+
+Пакет `darwin-universal` содержит Intel x64 и Apple Silicon ARM64. Updater сначала ищет пакет точной архитектуры macOS и только при его отсутствии выбирает Universal. Ошибка подписи или неоднозначность точного пакета блокирует обновление без перехода на Universal. Для других ОС и архитектур Universal не используется.
 
 Вход preview также принимает aliases `macos`, `x64`, `arm64`, нормализуя их в `darwin`, `x86_64`, `aarch64`. Адаптер допускает стандартные Tauri `i686`/`armv7`, но загрузка этих платформ пока не входит в каталог TARGETS. ZIP v1Compatible, DMG, DEB, RPM, произвольный EXE без явного назначения не считаются updater-пакетами. Сервис проверяет соответствие метаданных; он не запускает/не распаковывает исполняемые файлы и не может удостоверить NSIS по одному расширению. За правильный сборочный пакет отвечает администратор/система сборки.
 

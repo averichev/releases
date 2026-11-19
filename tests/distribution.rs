@@ -965,6 +965,66 @@ async fn nginx_delegation_is_authorized_and_head_is_complete_without_body() {
     );
 }
 #[tokio::test]
+async fn macos_universal_download_and_updater_serve_both_architectures() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("1.2.0").await;
+    let installer = t.upload(&r, "darwin-universal", "product.dmg").await;
+    let updater = t.upload(&r, "darwin-universal", "product.app.tar.gz").await;
+    let sig = signature();
+    t.state
+        .artifacts
+        .set_updater(
+            &t.actor,
+            &t.app,
+            &r.id,
+            &updater.id,
+            Some("updater"),
+            Some(Some(sig.as_bytes())),
+        )
+        .await
+        .unwrap();
+    t.publish(&r, "stable").await;
+    let latest = t
+        .get("GET", "/product/latest?target=darwin-universal", &[])
+        .await;
+    assert_eq!(latest.status(), 307);
+    assert_eq!(
+        latest.headers()["location"],
+        format!(
+            "/product/releases/{}/artifacts/{}/download",
+            r.version, installer.id
+        )
+    );
+    for arch in ["x86_64", "aarch64", "universal"] {
+        let response = t
+            .get(
+                "GET",
+                &format!("/api/v1/updates/tauri/product/stable/darwin/{arch}/1.0.0"),
+                &[],
+            )
+            .await;
+        assert_eq!(response.status(), 200);
+        let data = json_body(response).await;
+        assert_eq!(data["signature"], sig);
+        assert_eq!(
+            data["url"],
+            format!("https://apps.example.test{}", t.url(&r, &updater, "stable"))
+        );
+        let preview = t
+            .state
+            .updater
+            .preview(&t.app, "stable", &format!("darwin-{arch}"), "1.0.0")
+            .await
+            .unwrap();
+        assert_eq!(preview.state, "available");
+        assert_eq!(preview.artifact_id.as_deref(), Some(updater.id.as_str()));
+    }
+    assert_eq!(
+        bytes(t.get("GET", &t.url(&r, &updater, "stable"), &[]).await).await,
+        b"0123456789"
+    );
+}
+#[tokio::test]
 async fn tauri_http_updates_signatures_channels_and_no_downgrades() {
     let t = TestApp::new(DeliveryMode::Direct).await;
     let endpoint = "/api/v1/updates/tauri/product/stable/windows/x86_64/1.0.0";

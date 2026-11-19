@@ -25,3 +25,22 @@ it('explains a proxy upload limit and keeps the selected file for retry', async 
   expect(screen.queryByText('Файл загружен и сохранён.')).toBeNull();
   expect(onChange).toHaveBeenCalledOnce(); expect(onBusy).toHaveBeenLastCalledWith(false);
 });
+
+it('uploads a macOS Universal package using the target offered by the server', async () => {
+  let sent: FormData | undefined;
+  class AcceptedXhr {
+    upload = {}; status = 201; responseText = JSON.stringify({id: 'universal', target: 'darwin-universal', file_type: 'dmg'});
+    onload?: () => void;
+    open() {} setRequestHeader() {} send(data: FormData) { sent = data; this.onload?.(); }
+  }
+  vi.stubGlobal('XMLHttpRequest', AcceptedXhr);
+  render(<ArtifactUploader applicationId="app" releaseId="release" artifacts={[]} options={{targets: ['darwin-universal'], file_types: ['dmg'], max_file_bytes: 1024, upload_idle_seconds: 120}} onChange={vi.fn()} onBusy={vi.fn()} />);
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Целевая платформа'}));
+  fireEvent.click(await screen.findByText('macOS Universal (Intel + Apple Silicon)'));
+  fireEvent.change(document.querySelector('input[type="file"]')!, {target: {files: [new File(['new'], 'product.dmg')]}});
+  await screen.findByText('product.dmg · 3 B · DMG');
+  fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
+  await screen.findByText('Файл загружен и сохранён.');
+  expect(sent?.get('target')).toBe('darwin-universal');
+  expect((sent?.get('file') as File).name).toBe('product.dmg');
+});

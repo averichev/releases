@@ -23,6 +23,7 @@ from urllib.request import Request, HTTPCookieProcessor, build_opener
 
 def main():
     binary = Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/veruna-releases").resolve(strict=True)
+    migration_count = len(list((Path(__file__).resolve().parent.parent / "migrations").glob("[0-9]*.sql")))
     with tempfile.TemporaryDirectory(prefix="veruna-smoke-") as directory:
         root = Path(directory)
         with socket.socket() as listener:
@@ -267,7 +268,7 @@ def main():
             assert (root / "storage/artifacts").is_dir()
             with sqlite3.connect(root / "state/db/releases.sqlite") as database:
                 assert database.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-                assert database.execute("SELECT count(*) FROM _sqlx_migrations WHERE success = 1").fetchone()[0] == 7
+                assert database.execute("SELECT count(*) FROM _sqlx_migrations WHERE success = 1").fetchone()[0] == migration_count
                 assert database.execute("SELECT count(*) FROM user_tokens").fetchone()[0] == 0
                 assert database.execute("SELECT slug FROM applications").fetchone()[0] == "catalog-smoke"
                 assert database.execute("SELECT tauri_public_key FROM applications").fetchone()[0] == public_key

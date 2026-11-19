@@ -69,9 +69,22 @@ pub fn select(
     if !release.version.cmp_precedence(&current).is_gt() {
         return Ok(UpdateDecision::NoUpdate);
     }
-    let mut candidates = artifacts.into_iter().filter(|a| {
-        a.distribution_role == "updater" && compatible_tauri_target(a) == Some(target.as_str())
-    });
+    // Prefer the exact architecture. Universal is a fallback for modern Macs only;
+    // a broken or ambiguous exact package must still block the update.
+    let compatible: Vec<_> = artifacts
+        .into_iter()
+        .filter(|a| a.distribution_role == "updater" && compatible_tauri_target(a).is_some())
+        .collect();
+    let selected_target = if matches!(target.as_str(), "darwin-x86_64" | "darwin-aarch64")
+        && !compatible.iter().any(|a| a.target == target)
+    {
+        "darwin-universal"
+    } else {
+        target.as_str()
+    };
+    let mut candidates = compatible
+        .into_iter()
+        .filter(|a| a.target == selected_target);
     let Some(artifact) = candidates.next() else {
         return Ok(UpdateDecision::MissingPackage);
     };

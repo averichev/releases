@@ -38,7 +38,7 @@ export default function Manifests({ application }: { application: Application })
       <Alert className="form-alert" type="info" showIcon title="Публичный Tauri Updater v2 подключён." description="Предпросмотр проверяет версию, платформу, подпись и доступность файла. Приватные ключи храните в системе сборки." />
       <Form layout="vertical" disabled={busy} onValuesChange={() => { setPreview(undefined); setPreviewError(''); }} initialValues={{ current_version: '0.0.0', target: 'windows-x86_64' }} onFinish={(values) => { void check(values); }}>
         <Form.Item name="current_version" label="Версия клиента" rules={[{ required: true }]}><Input /></Form.Item>
-        <Form.Item name="target" label="Платформа Tauri" rules={[{ required: true }]}><Select options={['windows-x86_64', 'windows-aarch64', 'linux-x86_64', 'linux-aarch64', 'darwin-x86_64', 'darwin-aarch64'].map((target) => ({ value: target, label: targetName(target) }))} /></Form.Item>
+        <Form.Item name="target" label="Платформа Tauri" rules={[{ required: true }]}><Select options={['windows-x86_64', 'windows-aarch64', 'linux-x86_64', 'linux-aarch64', 'darwin-x86_64', 'darwin-aarch64', 'darwin-universal'].map((target) => ({ value: target, label: targetName(target) }))} /></Form.Item>
         <Button htmlType="submit" loading={busy}>Проверить Tauri</Button>
       </Form>
       {previewError && <Alert className="form-alert" type="error" title={previewError} showIcon />}

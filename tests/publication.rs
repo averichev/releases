@@ -1009,6 +1009,7 @@ async fn tauri_protocol_compares_semver_maps_targets_and_requires_explicit_signe
     for (internal, target, format) in [
         ("windows-aarch64", "windows-arm64", "msi"),
         ("darwin-aarch64", "macos-arm64", "tar.gz"),
+        ("darwin-universal", "macos-universal", "tar.gz"),
         ("linux-x86_64", "linux-x64", "appimage"),
     ] {
         a.target = internal.into();
@@ -1021,6 +1022,7 @@ async fn tauri_protocol_compares_semver_maps_targets_and_requires_explicit_signe
     for (target, format) in [
         ("windows-x86_64", "zip"),
         ("darwin-aarch64", "dmg"),
+        ("darwin-universal", "dmg"),
         ("linux-x86_64", "deb"),
     ] {
         a.target = target.into();
@@ -1030,6 +1032,75 @@ async fn tauri_protocol_compares_semver_maps_targets_and_requires_explicit_signe
             UpdateDecision::MissingPackage
         ));
     }
+    a.target = "darwin-universal".into();
+    a.file_type = "tar.gz".into();
+    for target in ["darwin-x86_64", "macos-arm64"] {
+        assert!(matches!(
+            updater::select(r.clone(), vec![a.clone()], target, "1.0.0").unwrap(),
+            UpdateDecision::Available(_)
+        ));
+    }
+    for target in [
+        "windows-x86_64",
+        "linux-aarch64",
+        "darwin-i686",
+        "darwin-armv7",
+    ] {
+        assert!(matches!(
+            updater::select(r.clone(), vec![a.clone()], target, "1.0.0").unwrap(),
+            UpdateDecision::MissingPackage
+        ));
+    }
+    for target in ["windows-universal", "linux-universal"] {
+        assert!(updater::select(r.clone(), vec![a.clone()], target, "1.0.0").is_err());
+    }
+    for target in ["darwin-x86_64", "darwin-aarch64"] {
+        let mut exact = a.clone();
+        exact.id = "exact-package".into();
+        exact.target = target.into();
+        for artifacts in [
+            vec![a.clone(), exact.clone()],
+            vec![exact.clone(), a.clone()],
+        ] {
+            let UpdateDecision::Available(selection) =
+                updater::select(r.clone(), artifacts, target, "1.0.0").unwrap()
+            else {
+                panic!("exact package expected");
+            };
+            assert_eq!(selection.artifact.id, exact.id);
+        }
+        assert!(matches!(
+            updater::select(
+                r.clone(),
+                vec![a.clone(), exact.clone(), exact.clone()],
+                target,
+                "1.0.0"
+            )
+            .unwrap(),
+            UpdateDecision::AmbiguousPackage
+        ));
+        exact.updater_signature = None;
+        assert!(matches!(
+            updater::select(r.clone(), vec![a.clone(), exact], target, "1.0.0").unwrap(),
+            UpdateDecision::MissingSignature
+        ));
+    }
+    a.updater_signature = None;
+    assert!(matches!(
+        updater::select(r.clone(), vec![a.clone()], "darwin-aarch64", "1.0.0").unwrap(),
+        UpdateDecision::MissingSignature
+    ));
+    a.updater_signature = Some(signature());
+    assert!(matches!(
+        updater::select(
+            r.clone(),
+            vec![a.clone(), a.clone()],
+            "darwin-aarch64",
+            "1.0.0"
+        )
+        .unwrap(),
+        UpdateDecision::AmbiguousPackage
+    ));
 }
 #[tokio::test]
 async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {

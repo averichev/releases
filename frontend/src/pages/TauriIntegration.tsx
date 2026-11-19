@@ -41,7 +41,7 @@ function Diagnostics({ application, settings }: {application: Application; setti
     finally { if (!c.signal.aborted) setBusy(false); }
   }
   return <>
-    <Typography.Paragraph>Проверка серверного протокола использует существующий preview: явный текущий релиз канала, SemVer и совместимый updater-пакет. Затем браузер запрашивает публичный endpoint без административной сессии.</Typography.Paragraph>
+    <Typography.Paragraph>Проверка серверного протокола использует существующий preview: явный текущий релиз канала, SemVer и совместимый updater-пакет. Для macOS проверяйте x86_64 и aarch64: при отсутствии отдельного пакета сервер выбирает macOS Universal. Затем браузер запрашивает публичный endpoint без административной сессии.</Typography.Paragraph>
     <Form layout="vertical" disabled={busy} initialValues={{os: 'windows', arch: 'x86_64', current_version: '1.0.0'}} onValuesChange={() => {setResult(undefined); setError(''); setNetwork(undefined);}} onFinish={(v) => {void check(v);}}>
       <div className="tauri-diagnostic-fields">
         <Form.Item label="Канал"><Input value={settings.channel} readOnly /></Form.Item>

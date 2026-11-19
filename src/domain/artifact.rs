@@ -6,6 +6,7 @@ pub const TARGETS: &[&str] = &[
     "linux-aarch64",
     "darwin-x86_64",
     "darwin-aarch64",
+    "darwin-universal",
     "any",
 ];
 pub const FILE_TYPES: &[&str] = &[

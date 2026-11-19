@@ -56,7 +56,9 @@ pub fn switch_action(previous: Option<&Release>, next: &Release) -> &'static str
 }
 pub fn compatible_tauri_target(artifact: &Artifact) -> Option<&str> {
     let (os, arch) = artifact.target.split_once('-')?;
-    if !matches!(arch, "x86_64" | "aarch64" | "i686" | "armv7") {
+    if !(matches!(arch, "x86_64" | "aarch64" | "i686" | "armv7")
+        || os == "darwin" && arch == "universal")
+    {
         return None;
     }
     let compatible = match os {
@@ -79,6 +81,7 @@ pub fn tauri_target(value: &str) -> Option<String> {
         "x86_64" | "x64" => "x86_64",
         "aarch64" | "arm64" => "aarch64",
         "i686" | "armv7" => arch,
+        "universal" if os == "darwin" => arch,
         _ => return None,
     };
     Some(format!("{os}-{arch}"))

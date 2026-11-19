@@ -389,6 +389,27 @@ async fn release_lifecycle_uniqueness_sort_search_and_archival() {
     app.call("GET", &path, Value::Null, 404).await;
 }
 #[tokio::test]
+async fn macos_universal_is_offered_and_accepted_for_upload() {
+    let app = TestApp::new().await;
+    let options = app
+        .call("GET", "/api/v1/admin/artifact-options", Value::Null, 200)
+        .await;
+    assert!(
+        options["targets"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("darwin-universal"))
+    );
+    let artifact = app
+        .upload("installer.dmg", "darwin-universal", b"universal", 201)
+        .await;
+    assert_eq!(artifact["target"], "darwin-universal");
+    assert_eq!(artifact["file_type"], "dmg");
+    for target in ["windows-universal", "linux-universal"] {
+        app.upload("installer.bin", target, b"invalid", 422).await;
+    }
+}
+#[tokio::test]
 async fn artifact_stream_hash_download_verify_delete_and_release_cascade() {
     let app = TestApp::new().await;
     let first = app
