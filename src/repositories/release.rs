@@ -100,7 +100,7 @@ impl ReleasesRepository {
     }
     pub async fn touch(c: &mut SqliteConnection, id: &str, now: i64) -> Result<()> {
         sqlx::query(
-            "UPDATE releases SET updated_at=max(updated_at,?),revision=revision+1 WHERE id=?",
+            "UPDATE releases SET updated_at=CASE WHEN status='draft' THEN max(updated_at,?) ELSE updated_at END,revision=revision+1 WHERE id=?",
         )
         .bind(now)
         .bind(id)

@@ -93,6 +93,7 @@ impl DistributionRepository {
         public: bool,
         limit: u32,
         offset: u32,
+        current_first: bool,
     ) -> Result<(
         crate::domain::application::Application,
         crate::domain::publication::ReleaseChannel,
@@ -106,13 +107,21 @@ impl DistributionRepository {
             ApplicationsRepository::get_in(&mut tx, key).await?
         };
         let channel = ChannelsRepository::get_in(&mut tx, &app.id, channel).await?;
+        if current_first && channel.current_release_id.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        let preferred = if current_first {
+            channel.current_release_id.as_deref()
+        } else {
+            None
+        };
         let total: i64 =
             sqlx::query_scalar("SELECT count(*) FROM channel_releases WHERE channel_id=?")
                 .bind(&channel.id)
                 .fetch_one(&mut *tx)
                 .await?;
-        let ids:Vec<String>=sqlx::query_scalar("SELECT r.id FROM releases r JOIN channel_releases cr ON cr.release_id=r.id WHERE cr.channel_id=? AND r.status='published' ORDER BY r.published_at DESC,r.id LIMIT ? OFFSET ?")
-            .bind(&channel.id).bind(limit).bind(offset).fetch_all(&mut *tx).await?;
+        let ids:Vec<String>=sqlx::query_scalar("SELECT r.id FROM releases r JOIN channel_releases cr ON cr.release_id=r.id WHERE cr.channel_id=? AND r.status='published' ORDER BY CASE WHEN r.id=? THEN 0 ELSE 1 END,r.published_at DESC,r.id LIMIT ? OFFSET ?")
+            .bind(&channel.id).bind(preferred).bind(limit).bind(offset).fetch_all(&mut *tx).await?;
         let mut releases = Vec::new();
         for id in ids {
             let r = ReleasesRepository::get_in(&mut tx, &app.id, &id).await?;

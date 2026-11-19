@@ -31,6 +31,7 @@ pub struct UploadMetadata {
     pub filename: String,
     pub target: String,
     pub file_type: Option<String>,
+    pub distribution_role: Option<String>,
 }
 pub fn valid_filename(value: &str) -> bool {
     !value.trim().is_empty()

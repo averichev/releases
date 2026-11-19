@@ -32,8 +32,12 @@ pub enum ServiceError {
     ReleaseLocked,
     #[error("Invalid artifact metadata or multipart upload")]
     InvalidArtifact,
-    #[error("Artifact target and format already exist")]
+    #[error("Artifact target, format and role already exist, or target already has an updater")]
     ArtifactConflict,
+    #[error("Published updater requires a signature in the same upload")]
+    UpdaterSignatureRequired,
+    #[error("Configure the default installer before adding an ambiguous installer")]
+    DefaultInstallerRequired,
     #[error("Upload exceeds size limit")]
     PayloadTooLarge,
     #[error("Upload timed out")]
@@ -62,6 +66,12 @@ impl From<sqlx::Error> for ServiceError {
         if let sqlx::Error::Database(ref db) = error {
             if db.message() == "release_locked" {
                 return Self::ReleaseLocked;
+            }
+            if db.message() == "artifact_exists" {
+                return Self::ArtifactConflict;
+            }
+            if db.message() == "updater_signature_required" {
+                return Self::UpdaterSignatureRequired;
             }
             if db.message() == "last_active_admin" {
                 return Self::LastAdmin;

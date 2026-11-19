@@ -70,6 +70,14 @@ GET иконки защищён той же сессией и доступен �
 
 Публичных страниц, скачиваний, манифестов, API релизов и прав на отдельные приложения на этапе 3 нет.
 
+## Загрузка в существующий релиз
+
+`POST /api/v1/admin/applications/{id}/releases/{releaseId}/artifacts` доступен admin для draft/published с прежними session/Origin/CSRF-проверками. Multipart: target, необязательные file_type/distribution_role до file, необязательный файловый part signature (.sig, до 16 КиБ) до или после file. Отсутствующая distribution_role означает installer. Детали и curl: [загрузка файлов](releases.md#административный-api).
+
+Уникальны target/format/role внутри релиза, updater допускается один на target независимо от формата. Конфликт загрузки или редактирования роли draft — 409 artifact_exists. Published updater без подписи в том же запросе — 422 updater_signature_required; некорректная подпись/совместимость — 422 invalid_updater. Неоднозначный выбор установщика после дополнения published — 409 default_installer_required: настройте default installer. Все ошибки сохраняют прежние записи, revision и публикацию.
+
+Успех: 201 Artifact DTO, атомарно увеличенный release.revision. Первоначальный published_at, updated_at, версия, каналы и история не меняются. Изменение/удаление старых published артефактов, включая подпись и роль, остаётся 409 release_locked. Повторная загрузка не заменяет прежний UUID.
+
 ## Публикации и обновления (этап 5)
 
 Базовый путь для таблицы — `/api/v1/admin/applications/{applicationId}`. Все запросы требуют живую session cookie. Каналы/историю и Tauri preview читают admin/operator; validation публикации, preview универсального манифеста, публикацию, переключение и updater metadata — только admin. Все POST/PUT/DELETE проходят существующие Origin/custom-header/CSRF проверки, изменения повторно проверяют session/admin в write-транзакции.

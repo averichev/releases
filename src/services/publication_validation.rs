@@ -81,7 +81,11 @@ impl PublicationValidator {
                 artifact_id: Some(artifact.id.clone()),
                 message,
             };
-            if !targets.insert((&artifact.target, &artifact.file_type)) {
+            if !targets.insert((
+                &artifact.target,
+                &artifact.file_type,
+                &artifact.distribution_role,
+            )) {
                 errors.push(issue(
                     "ambiguous_artifact",
                     format!(

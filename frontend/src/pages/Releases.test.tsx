@@ -47,7 +47,7 @@ it('restores detail for operators with download and checksum but no mutations', 
   expect(await screen.findByRole('heading', { name: '1.2.0' })).toBeDefined();
   expect(screen.getByRole('link', { name: 'Скачать' }).getAttribute('href')).toBe(`/api/v1/admin/applications/${application.id}/releases/${release.id}/artifacts/file-id/download`);
   expect(screen.getByText('a'.repeat(64))).toBeDefined();
-  expect(screen.queryByRole('button', { name: 'Загрузить файл' })).toBeNull(); expect(screen.queryByRole('button', { name: 'Удалить черновик' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Добавить артефакт' })).toBeNull(); expect(screen.queryByRole('button', { name: 'Удалить черновик' })).toBeNull();
 });
 it('edits draft metadata and requires confirmation before deletion', async () => {
   const fetch = mockFetch(); renderAt(route);
@@ -72,7 +72,7 @@ it('keeps active uploads open on Escape and supports explicit cancellation', asy
     open() {} setRequestHeader() {} send() {} abort() { this.onabort?.(); }
   }
   vi.stubGlobal('XMLHttpRequest', PendingXhr); mockFetch(); renderAt(route);
-  fireEvent.click(await screen.findByRole('button', { name: 'Загрузить файл' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Добавить артефакт' }));
   const platform = await screen.findByRole('combobox', { name: 'Целевая платформа' }); fireEvent.mouseDown(platform);
   fireEvent.click(await screen.findByText('Любая платформа'));
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -88,4 +88,34 @@ it('keeps active uploads open on Escape and supports explicit cancellation', asy
   expect(await screen.findByText(/Загрузка отменена/)).toBeDefined();
   expect(within(dialog).queryByRole('button', { name: 'Отменить загрузку' })).toBeNull();
   expect(within(dialog).getByRole('button', { name: /close|закрыть/i })).toBeDefined();
+}, 40000);
+
+it('refreshes artifacts and public links after appending to a published release', async () => {
+  const added = { ...artifact, id: 'updater-id', filename: 'updater.exe', file_type: 'exe', distribution_role: 'updater', signature_present: true };
+  let uploaded = false;
+  class AcceptedXhr {
+    upload = {}; status = 201; responseText = JSON.stringify(added); onload?: () => void;
+    open() {} setRequestHeader() {} send() { uploaded = true; this.onload?.(); }
+  }
+  vi.stubGlobal('XMLHttpRequest', AcceptedXhr);
+  const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session
+    : url.endsWith('/artifact-options') ? options : url.endsWith('/artifacts') ? (uploaded ? [artifact, added] : [artifact])
+      : url.includes('/distribution/releases/') ? { public_available: true, warnings: [], files: uploaded ? [{ id: added.id, url: 'https://example.test/new-updater', tauri_compatible: true, signature_present: true }] : [] }
+        : url.endsWith(`/${release.id}`) ? { ...release, status: 'published', revision: uploaded ? 2 : 1, channels: ['stable'], published_at: 1 } : application)));
+  vi.stubGlobal('fetch', fetch); renderAt(route);
+  fireEvent.click(await screen.findByRole('button', { name: 'Добавить артефакт' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Загрузка дистрибутива' });
+  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Назначение' }));
+  fireEvent.click(await screen.findByText('Пакет обновления (Tauri Updater)'));
+  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Целевая платформа' }));
+  fireEvent.click(await screen.findByText('Windows x64', { selector: '.ant-select-item-option-content' }));
+  fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [new File(['new'], 'updater.exe')] } });
+  await screen.findByText('updater.exe · 3 B · EXE');
+  fireEvent.change(within(dialog).getByLabelText('Подпись Tauri (.sig)'), { target: { files: [new File(['signature'], 'updater.sig')] } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Загрузить файл' }));
+  expect(await screen.findByText('Файл загружен и сохранён.')).toBeDefined();
+  expect(await screen.findByText('updater.exe', { selector: '.artifact-filename' })).toBeDefined();
+  expect(await screen.findByRole('link', { name: 'https://example.test/new-updater' })).toBeDefined();
+  expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Назначение updater.exe' })).toBeNull();
 }, 40000);

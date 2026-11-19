@@ -55,19 +55,22 @@ pub fn switch_action(previous: Option<&Release>, next: &Release) -> &'static str
     }
 }
 pub fn compatible_tauri_target(artifact: &Artifact) -> Option<&str> {
-    let (os, arch) = artifact.target.split_once('-')?;
+    compatible_tauri_format(&artifact.target, &artifact.file_type)
+}
+pub fn compatible_tauri_format<'a>(target: &'a str, file_type: &str) -> Option<&'a str> {
+    let (os, arch) = target.split_once('-')?;
     if !(matches!(arch, "x86_64" | "aarch64" | "i686" | "armv7")
         || os == "darwin" && arch == "universal")
     {
         return None;
     }
     let compatible = match os {
-        "windows" => matches!(artifact.file_type.as_str(), "exe" | "msi"),
-        "linux" => artifact.file_type == "appimage",
-        "darwin" => artifact.file_type == "tar.gz",
+        "windows" => matches!(file_type, "exe" | "msi"),
+        "linux" => file_type == "appimage",
+        "darwin" => file_type == "tar.gz",
         _ => false,
     };
-    compatible.then_some(artifact.target.as_str())
+    compatible.then_some(target)
 }
 pub fn tauri_target(value: &str) -> Option<String> {
     let (os, arch) = value.split_once('-')?;

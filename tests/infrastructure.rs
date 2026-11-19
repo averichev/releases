@@ -60,7 +60,7 @@ async fn creates_configured_paths_and_applies_baseline_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(migrations, 7);
+    assert_eq!(migrations, 8);
     pool.close().await;
 }
 
@@ -125,7 +125,7 @@ async fn catalog_migration_preserves_an_existing_identity_database() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        7
+        8
     );
 }
 
@@ -226,4 +226,234 @@ async fn publication_migration_preserves_stage_four_objects_and_backfills_channe
         2
     );
     pool.close().await;
+}
+
+#[tokio::test]
+async fn append_migration_preserves_published_signed_artifacts_and_channel_links() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use veruna_releases::{
+        application_state,
+        domain::{
+            application::{NewApplication, Visibility},
+            artifact::UploadMetadata,
+            release::ReleaseInput,
+        },
+        services::publishing::PublicationCommand,
+    };
+    let dir = tempdir().unwrap();
+    let mut config = AppConfig::default();
+    config.database.path = dir.path().join("existing.sqlite");
+    config.storage.directory = dir.path().join("artifacts");
+    config.storage.icons_directory = dir.path().join("icons");
+    let old = dir.path().join("old");
+    std::fs::create_dir(&old).unwrap();
+    for entry in std::fs::read_dir("migrations").unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_str().unwrap() < "0008" {
+            std::fs::copy(entry.path(), old.join(entry.file_name())).unwrap();
+        }
+    }
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&config.database.path)
+            .create_if_missing(true)
+            .foreign_keys(true),
+    )
+    .await
+    .unwrap();
+    sqlx::migrate::Migrator::new(old.as_path())
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+    use veruna_releases::infrastructure::storage::{ArtifactStorage, LocalArtifactStorage};
+    LocalArtifactStorage::new(&config.storage)
+        .initialize()
+        .await
+        .unwrap();
+    let state = application_state(pool.clone(), &config).await.unwrap();
+    state
+        .authentication
+        .bootstrap("owner", "test-password-123".into())
+        .await
+        .unwrap();
+    let login = state
+        .authentication
+        .login("owner", "test-password-123".into(), None)
+        .await
+        .unwrap();
+    let actor = state.sessions.authenticate(&login.token).await.unwrap();
+    let app = state
+        .applications
+        .create(
+            &actor,
+            NewApplication {
+                slug: "product".into(),
+                name: "Product".into(),
+                description: "".into(),
+                visibility: Visibility::Public,
+            },
+        )
+        .await
+        .unwrap();
+    let r = state
+        .releases
+        .create(
+            &actor,
+            &app.id,
+            ReleaseInput {
+                version: "0.5.0+ci.7".into(),
+                title: Some("Preserve title".into()),
+                release_notes: "Preserve notes".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut packet = [0u8; 74];
+    packet[..2].copy_from_slice(b"Ed");
+    let sig = STANDARD.encode(format!(
+        "untrusted comment: signature\n{}\ntrusted comment: timestamp:1\n{}\n",
+        STANDARD.encode(packet),
+        STANDARD.encode([0u8; 64])
+    ));
+    let mut pending = state
+        .artifacts
+        .begin(
+            &actor,
+            &app.id,
+            &r.id,
+            UploadMetadata {
+                filename: "updater.exe".into(),
+                target: "windows-x86_64".into(),
+                file_type: None,
+                distribution_role: Some("updater".into()),
+            },
+        )
+        .await
+        .unwrap();
+    pending.set_signature(sig.as_bytes()).unwrap();
+    pending.write(b"package").await.unwrap();
+    let a = state.artifacts.complete(&actor, pending).await.unwrap();
+    state
+        .publishing
+        .publish(
+            &actor,
+            &app.id,
+            &r.id,
+            PublicationCommand {
+                channel: "stable".into(),
+                expected_channel_revision: 0,
+                expected_release_revision: 1,
+            },
+        )
+        .await
+        .unwrap();
+    let before = state.releases.get(&app.id, &r.id).await.unwrap();
+    let links: Vec<(String, String, i64, String, String, i64)> = sqlx::query_as("SELECT c.id,c.current_release_id,c.revision,cr.release_id,cr.application_id,cr.added_at FROM release_channels c JOIN channel_releases cr ON cr.channel_id=c.id").fetch_all(&pool).await.unwrap();
+    let history: Vec<(i64, String, String, String, String, String, i64)> = sqlx::query_as("SELECT id,application_id,channel_id,release_id,action,user_id,created_at FROM publication_history").fetch_all(&pool).await.unwrap();
+    drop(state);
+    pool.close().await;
+    let pool = initialize(&config).await.unwrap();
+    let state = application_state(pool.clone(), &config).await.unwrap();
+    assert_eq!(state.releases.get(&app.id, &r.id).await.unwrap(), before);
+    assert_eq!(
+        state.artifacts.list(&app.id, &r.id).await.unwrap(),
+        vec![a.clone()]
+    );
+    assert_eq!(
+        std::fs::read(config.storage.directory.join(&a.storage_key)).unwrap(),
+        b"package"
+    );
+    assert_eq!(sqlx::query_as::<_, (String, String, i64, String, String, i64)>("SELECT c.id,c.current_release_id,c.revision,cr.release_id,cr.application_id,cr.added_at FROM release_channels c JOIN channel_releases cr ON cr.channel_id=c.id").fetch_all(&pool).await.unwrap(), links);
+    assert_eq!(sqlx::query_as::<_, (i64, String, String, String, String, String, i64)>("SELECT id,application_id,channel_id,release_id,action,user_id,created_at FROM publication_history").fetch_all(&pool).await.unwrap(), history);
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    drop(state);
+    pool.close().await;
+    let pool = initialize(&config).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        8
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn append_migration_rejects_legacy_updater_duplicates_without_losing_data() {
+    use sqlx::Connection;
+    let mut c = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new()
+            .in_memory(true)
+            .foreign_keys(true),
+    )
+    .await
+    .unwrap();
+    for sql in [
+        include_str!("../migrations/0001_baseline.sql"),
+        include_str!("../migrations/0002_identity.sql"),
+        include_str!("../migrations/0003_applications.sql"),
+        include_str!("../migrations/0004_releases_artifacts.sql"),
+        include_str!("../migrations/0005_publication.sql"),
+        include_str!("../migrations/0006_distribution.sql"),
+        include_str!("../migrations/0007_tauri_integration.sql"),
+    ] {
+        sqlx::raw_sql(sql).execute(&mut c).await.unwrap();
+    }
+    let app = uuid::Uuid::new_v4().to_string();
+    let release = uuid::Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO applications(id,slug,name,name_search,description,visibility,status,created_at,updated_at) VALUES(?,'product','Product','product','','public','active',1,1)").bind(&app).execute(&mut c).await.unwrap();
+    sqlx::query("INSERT INTO releases(id,application_id,version,version_key,created_at,updated_at) VALUES(?,?,'0.5.0','0.5.0',1,1)").bind(&release).bind(&app).execute(&mut c).await.unwrap();
+    for format in ["exe", "msi"] {
+        sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature) VALUES(?,?,'update.exe','windows-x86_64',?,7,?,?,1,'updater','preserve-signature')")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&release).bind(format).bind("a".repeat(64)).bind(format!("{}.blob", uuid::Uuid::new_v4().simple())).execute(&mut c).await.unwrap();
+    }
+    let before: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id,storage_key,updater_signature FROM artifacts ORDER BY id")
+            .fetch_all(&mut c)
+            .await
+            .unwrap();
+    let mut tx = c.begin().await.unwrap();
+    assert!(
+        sqlx::raw_sql(include_str!(
+            "../migrations/0008_artifact_roles_and_append.sql"
+        ))
+        .execute(&mut *tx)
+        .await
+        .is_err()
+    );
+    tx.rollback().await.unwrap();
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id,storage_key,updater_signature FROM artifacts ORDER BY id"
+        )
+        .fetch_all(&mut c)
+        .await
+        .unwrap(),
+        before
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM sqlite_schema WHERE name='artifacts_next'"
+        )
+        .fetch_one(&mut c)
+        .await
+        .unwrap(),
+        0
+    );
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&mut c)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

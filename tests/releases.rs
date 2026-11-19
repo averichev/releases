@@ -198,6 +198,7 @@ fn metadata(target: &str) -> UploadMetadata {
         filename: "installer.bin".into(),
         target: target.into(),
         file_type: None,
+        distribution_role: None,
     }
 }
 fn multipart(filename: &str, target: &str, bytes: &[u8]) -> Vec<u8> {

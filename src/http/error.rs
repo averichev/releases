@@ -26,6 +26,8 @@ pub enum ApiError {
     ReleaseLocked,
     InvalidArtifact,
     ArtifactConflict,
+    UpdaterSignatureRequired,
+    DefaultInstallerRequired,
     PayloadTooLarge,
     UploadTimeout,
     StorageFull,
@@ -102,10 +104,20 @@ impl IntoResponse for ApiError {
                 "invalid_artifact",
                 "Invalid filename, target, format or multipart fields",
             ),
+            Self::UpdaterSignatureRequired => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "updater_signature_required",
+                "Published updater requires a valid .sig in the same upload",
+            ),
+            Self::DefaultInstallerRequired => (
+                StatusCode::CONFLICT,
+                "default_installer_required",
+                "Configure the default installer before adding another installer; /latest would become ambiguous",
+            ),
             Self::ArtifactConflict => (
                 StatusCode::CONFLICT,
                 "artifact_exists",
-                "Artifact target and format already exist in this release",
+                "Artifact target, format and role already exist, or this target already has an updater",
             ),
             Self::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,

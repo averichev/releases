@@ -75,25 +75,26 @@ impl ArtifactsRepository {
         Ok(sqlx::query_as::<_,StoredArtifact>("SELECT a.* FROM artifacts a JOIN releases r ON r.id=a.release_id WHERE r.application_id=? AND a.release_id=? AND a.id=?")
             .bind(app).bind(release).bind(id).fetch_optional(&self.pool).await?.ok_or(ServiceError::NotFound)?.into())
     }
-    pub async fn duplicate(
+    pub async fn check_conflict(
         c: &mut SqliteConnection,
         release: &str,
         target: &str,
         format: &str,
-    ) -> Result<bool> {
-        Ok(sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM artifacts WHERE release_id=? AND target=? AND file_type=?",
-        )
-        .bind(release)
-        .bind(target)
-        .bind(format)
-        .fetch_one(c)
-        .await?
-            > 0)
+        role: &str,
+        exclude: Option<&str>,
+    ) -> Result<()> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM artifacts WHERE release_id=? AND target=? AND distribution_role=? AND (file_type=? OR distribution_role='updater') AND (? IS NULL OR id!=?))",
+        ).bind(release).bind(target).bind(role).bind(format).bind(exclude).bind(exclude)
+            .fetch_one(c).await?;
+        if exists {
+            return Err(ServiceError::ArtifactConflict);
+        }
+        Ok(())
     }
     pub async fn insert(c: &mut SqliteConnection, a: &Artifact) -> Result<()> {
-        let result=sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at) VALUES(?,?,?,?,?,?,?,?,?)")
-            .bind(&a.id).bind(&a.release_id).bind(&a.filename).bind(&a.target).bind(&a.file_type).bind(a.size_bytes).bind(&a.sha256).bind(&a.storage_key).bind(a.created_at).execute(c).await;
+        let result=sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+            .bind(&a.id).bind(&a.release_id).bind(&a.filename).bind(&a.target).bind(&a.file_type).bind(a.size_bytes).bind(&a.sha256).bind(&a.storage_key).bind(a.created_at).bind(&a.distribution_role).bind(&a.updater_signature).execute(c).await;
         match result {
             Err(sqlx::Error::Database(ref e)) if e.is_unique_violation() => {
                 return Err(ServiceError::ArtifactConflict);
@@ -110,13 +111,22 @@ impl ArtifactsRepository {
         role: &str,
         signature: Option<&str>,
     ) -> Result<()> {
-        sqlx::query("UPDATE artifacts SET distribution_role=?,updater_signature=? WHERE id=?")
-            .bind(role)
-            .bind(signature)
-            .bind(id)
-            .execute(c)
-            .await?;
-        Ok(())
+        let result =
+            sqlx::query("UPDATE artifacts SET distribution_role=?,updater_signature=? WHERE id=?")
+                .bind(role)
+                .bind(signature)
+                .bind(id)
+                .execute(c)
+                .await;
+        match result {
+            Err(sqlx::Error::Database(ref e)) if e.is_unique_violation() => {
+                Err(ServiceError::ArtifactConflict)
+            }
+            other => {
+                other?;
+                Ok(())
+            }
+        }
     }
     pub async fn delete(c: &mut SqliteConnection, release: &str, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM artifacts WHERE release_id=? AND id=?")

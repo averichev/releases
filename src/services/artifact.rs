@@ -1,14 +1,21 @@
 use crate::{
     domain::{
+        application::Status,
         artifact::{self, Artifact, UploadMetadata},
+        publication::{compatible_tauri_format, compatible_tauri_target},
+        release::ReleaseStatus,
         user::Role,
     },
     infrastructure::{
         secrets,
         storage::{ArtifactStorage, LocalArtifactStorage, PendingUpload},
     },
-    repositories::{artifact::ArtifactsRepository, release::ReleasesRepository},
+    repositories::{
+        applications::ApplicationsRepository, artifact::ArtifactsRepository,
+        distribution::DistributionRepository, release::ReleasesRepository,
+    },
     services::{
+        distribution::check_installer_addition,
         error::{Result, ServiceError},
         release::{authorize, draft, remove_after_commit},
         sessions::Identity,
@@ -28,8 +35,17 @@ pub struct ArtifactUpload {
     filename: String,
     target: String,
     file_type: String,
+    distribution_role: String,
+    updater_signature: Option<String>,
 }
 impl ArtifactUpload {
+    pub fn set_signature(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.distribution_role != "updater" {
+            return Err(ServiceError::InvalidUpdater);
+        }
+        self.updater_signature = Some(crate::services::updater::signature(bytes)?);
+        Ok(())
+    }
     pub async fn write(&mut self, bytes: &[u8]) -> Result<()> {
         self.pending.write(bytes).await
     }
@@ -67,13 +83,26 @@ impl ArtifactManagement {
         }
         let file_type = artifact::file_type(&metadata.filename, metadata.file_type.as_deref())
             .ok_or(ServiceError::InvalidArtifact)?;
+        let role = metadata.distribution_role.as_deref().unwrap_or("installer");
+        if !matches!(role, "installer" | "updater")
+            || (role == "updater"
+                && compatible_tauri_format(&metadata.target, &file_type).is_none())
+        {
+            return Err(ServiceError::InvalidUpdater);
+        }
         // This short transaction finishes before receiving file bytes.
         let mut tx = self.releases.write().await?;
         authorize(&mut tx, actor).await?;
-        draft(&ReleasesRepository::get_in(&mut tx, app, release).await?)?;
-        if ArtifactsRepository::duplicate(&mut tx, release, &metadata.target, &file_type).await? {
-            return Err(ServiceError::ArtifactConflict);
-        }
+        ReleasesRepository::get_in(&mut tx, app, release).await?;
+        ArtifactsRepository::check_conflict(
+            &mut tx,
+            release,
+            &metadata.target,
+            &file_type,
+            role,
+            None,
+        )
+        .await?;
         tx.commit().await?;
         let pending = self.storage.begin().await?;
         Ok(ArtifactUpload {
@@ -83,6 +112,8 @@ impl ArtifactManagement {
             filename: metadata.filename,
             target: metadata.target,
             file_type,
+            distribution_role: role.to_owned(),
+            updater_signature: None,
         })
     }
     pub async fn complete(&self, actor: &Identity, mut upload: ArtifactUpload) -> Result<Artifact> {
@@ -98,12 +129,43 @@ impl ArtifactManagement {
             sha256: upload.pending.sha256(),
             storage_key: upload.pending.key.clone(),
             created_at: now,
-            distribution_role: "installer".into(),
-            updater_signature: None,
+            distribution_role: upload.distribution_role,
+            updater_signature: upload.updater_signature,
         };
         let mut tx = self.releases.write().await?;
         authorize(&mut tx, actor).await?;
-        draft(&ReleasesRepository::get_in(&mut tx, &upload.app, &upload.release).await?)?;
+        let release = ReleasesRepository::get_in(&mut tx, &upload.app, &upload.release).await?;
+        ArtifactsRepository::check_conflict(
+            &mut tx,
+            &upload.release,
+            &artifact.target,
+            &artifact.file_type,
+            &artifact.distribution_role,
+            None,
+        )
+        .await?;
+        if release.status == ReleaseStatus::Published {
+            if ApplicationsRepository::get_in(&mut tx, &upload.app)
+                .await?
+                .status
+                != Status::Active
+            {
+                return Err(ServiceError::ReleaseLocked);
+            }
+            if artifact.distribution_role == "updater" {
+                if compatible_tauri_target(&artifact).is_none() {
+                    return Err(ServiceError::InvalidUpdater);
+                }
+                if artifact.updater_signature.is_none() {
+                    return Err(ServiceError::UpdaterSignatureRequired);
+                }
+            }
+            if artifact.distribution_role == "installer" {
+                let selector = DistributionRepository::selector_in(&mut tx, &upload.app).await?;
+                let artifacts = ArtifactsRepository::list_in(&mut tx, &upload.release).await?;
+                check_installer_addition(&artifacts, &artifact, selector.as_ref())?;
+            }
+        }
         ArtifactsRepository::insert(&mut tx, &artifact).await?;
         ReleasesRepository::touch(&mut tx, &upload.release, now).await?;
         // From this point a failed/cancelled commit may already be durable.
@@ -175,6 +237,15 @@ impl ArtifactManagement {
             artifact.updater_signature =
                 value.map(crate::services::updater::signature).transpose()?;
         }
+        ArtifactsRepository::check_conflict(
+            &mut tx,
+            release,
+            &artifact.target,
+            &artifact.file_type,
+            &artifact.distribution_role,
+            Some(id),
+        )
+        .await?;
         ArtifactsRepository::updater(
             &mut tx,
             id,

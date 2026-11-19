@@ -114,6 +114,7 @@ impl TestApp {
                     filename: filename.into(),
                     target: target.into(),
                     file_type: None,
+                    distribution_role: None,
                 },
             )
             .await
@@ -281,11 +282,12 @@ async fn publication_checks_lifecycle_http_and_sql_immutability_and_idempotency(
                 UploadMetadata {
                     filename: "new.zip".into(),
                     target: "any".into(),
-                    file_type: None
+                    file_type: None,
+                    distribution_role: None,
                 }
             )
             .await
-            .is_err()
+            .is_ok()
     );
     for sql in [
         "UPDATE releases SET release_notes='changed' WHERE status='published'",
@@ -1209,36 +1211,23 @@ async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {
 }
 
 #[tokio::test]
-async fn ambiguous_updater_blocks_publication_and_inflight_upload_cannot_change_published_files() {
+async fn updater_conflict_and_inflight_installer_recheck_published_selection() {
     let t = TestApp::new().await;
     let r = t.create("1.0.0").await;
     let one = t.upload(&r, "windows-x86_64", "setup.exe").await;
     let two = t.upload(&r, "windows-x86_64", "setup.msi").await;
-    for a in [&one, &two] {
-        t.state
-            .artifacts
-            .set_updater(&t.actor, &t.app, &r.id, &a.id, Some("updater"), None)
-            .await
-            .unwrap();
-    }
-    let check = t
-        .state
-        .publishing
-        .validate(&t.actor, &t.app, &r.id, "stable")
-        .await
-        .unwrap();
-    assert!(
-        check
-            .validation
-            .errors
-            .iter()
-            .any(|e| e.code == "ambiguous_updater")
-    );
     t.state
         .artifacts
-        .set_updater(&t.actor, &t.app, &r.id, &two.id, Some("installer"), None)
+        .set_updater(&t.actor, &t.app, &r.id, &one.id, Some("updater"), None)
         .await
         .unwrap();
+    assert!(matches!(
+        t.state
+            .artifacts
+            .set_updater(&t.actor, &t.app, &r.id, &two.id, Some("updater"), None)
+            .await,
+        Err(ServiceError::ArtifactConflict)
+    ));
     let mut pending = t
         .state
         .artifacts
@@ -1250,27 +1239,31 @@ async fn ambiguous_updater_blocks_publication_and_inflight_upload_cannot_change_
                 filename: "linux.deb".into(),
                 target: "linux-x86_64".into(),
                 file_type: None,
+                distribution_role: None,
             },
         )
         .await
         .unwrap();
     pending.write(b"pending").await.unwrap();
     t.publish(&r, "stable").await;
+    // Publication while bytes are in flight must activate published append rules.
     assert!(matches!(
         t.state.artifacts.complete(&t.actor, pending).await,
-        Err(ServiceError::ReleaseLocked)
+        Err(ServiceError::DefaultInstallerRequired)
     ));
     assert_eq!(
         t.state.artifacts.list(&t.app, &r.id).await.unwrap().len(),
         2
     );
-    let preview = t
-        .state
-        .updater
-        .preview(&t.app, "stable", "windows-x86_64", "0.0.0")
-        .await
-        .unwrap();
-    assert_eq!(preview.reason, "signature_missing");
+    assert_eq!(
+        t.state
+            .updater
+            .preview(&t.app, "stable", "windows-x86_64", "0.0.0")
+            .await
+            .unwrap()
+            .reason,
+        "signature_missing"
+    );
 }
 
 #[tokio::test]
@@ -1309,4 +1302,680 @@ async fn history_failure_rolls_back_publication_membership_and_current_pointer()
         .await
         .unwrap();
     t.publish(&r, "stable").await;
+}
+
+impl TestApp {
+    async fn upload_form(
+        &self,
+        r: &Release,
+        target: &str,
+        filename: &str,
+        role: Option<&str>,
+        sig: Option<&str>,
+    ) -> Response {
+        let mut body = format!(
+            "--UPLOAD\r\nContent-Disposition: form-data; name=\"target\"\r\n\r\n{target}\r\n"
+        );
+        if let Some(role) = role {
+            body.push_str(&format!("--UPLOAD\r\nContent-Disposition: form-data; name=\"distribution_role\"\r\n\r\n{role}\r\n"));
+        }
+        body.push_str(&format!("--UPLOAD\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\npackage\r\n"));
+        if let Some(sig) = sig {
+            body.push_str(&format!("--UPLOAD\r\nContent-Disposition: form-data; name=\"signature\"; filename=\"{filename}.sig\"\r\n\r\n{sig}\r\n"));
+        }
+        body.push_str("--UPLOAD--\r\n");
+        self.router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("{}/artifacts", self.release_path(r)))
+                    .header("origin", &self.config.auth.public_origin)
+                    .header("x-veruna-request", "1")
+                    .header("x-csrf-token", secrets::csrf(&self.token))
+                    .header("cookie", format!("veruna_session={}", self.token))
+                    .header("content-type", "multipart/form-data; boundary=UPLOAD")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+}
+async fn response_json(response: Response, status: u16) -> Value {
+    let actual = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(actual, status, "{}", String::from_utf8_lossy(&bytes));
+    serde_json::from_slice(&bytes).unwrap()
+}
+#[tokio::test]
+async fn draft_upload_roles_conflicts_and_signature_are_atomic() {
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    let installer = response_json(
+        t.upload_form(&r, "windows-x86_64", "installer.exe", None, None)
+            .await,
+        201,
+    )
+    .await;
+    assert_eq!(installer["distribution_role"], "installer"); // old clients
+    let updater = response_json(
+        t.upload_form(&r, "windows-x86_64", "updater.exe", Some("updater"), None)
+            .await,
+        201,
+    )
+    .await;
+    assert_eq!(updater["distribution_role"], "updater");
+    assert_eq!(updater["signature_present"], false);
+    let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    for (filename, role) in [
+        ("again.exe", "installer"),
+        ("again.exe", "updater"),
+        ("again.msi", "updater"),
+    ] {
+        assert_eq!(
+            response_json(
+                t.upload_form(&r, "windows-x86_64", filename, Some(role), None)
+                    .await,
+                409
+            )
+            .await["error"]["code"],
+            "artifact_exists"
+        );
+    }
+    for (id, role) in [
+        (installer["id"].as_str().unwrap(), "updater"),
+        (updater["id"].as_str().unwrap(), "installer"),
+    ] {
+        t.call(
+            "PUT",
+            &format!("{}/artifacts/{id}/updater", t.release_path(&r)),
+            json!({"distribution_role":role}),
+            409,
+        )
+        .await;
+    }
+    assert_eq!(t.state.releases.get(&t.app, &r.id).await.unwrap(), before);
+    let check = t
+        .state
+        .publishing
+        .validate(&t.actor, &t.app, &r.id, "stable")
+        .await
+        .unwrap();
+    assert!(check.validation.errors.is_empty());
+    let sig = signature();
+    assert_eq!(
+        t.request(
+            "PUT",
+            &format!(
+                "{}/artifacts/{}/signature",
+                t.release_path(&r),
+                updater["id"].as_str().unwrap()
+            ),
+            Body::from(sig.clone()),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        200
+    );
+    let darwin = response_json(
+        t.upload_form(
+            &r,
+            "darwin-aarch64",
+            "update.tar.gz",
+            Some("updater"),
+            Some(&sig),
+        )
+        .await,
+        201,
+    )
+    .await;
+    assert_eq!(darwin["signature_present"], true);
+    t.publish(&r, "stable").await;
+    t.call(
+        "POST",
+        &format!("{}/releases", t.base()),
+        json!({"version":"0.5.0","release_notes":""}),
+        409,
+    )
+    .await;
+}
+#[tokio::test]
+async fn published_append_updates_manifest_etag_downloads_and_tauri_without_changing_publication() {
+    use veruna_releases::domain::application::DistributionSelector;
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    let installer = t.upload(&r, "windows-x86_64", "installer.exe").await;
+    t.publish(&r, "stable").await;
+    let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    let channels = t
+        .call("GET", &format!("{}/channels", t.base()), Value::Null, 200)
+        .await;
+    let history = t
+        .call(
+            "GET",
+            &format!("{}/publication-history", t.base()),
+            Value::Null,
+            200,
+        )
+        .await;
+    let old_etag = t
+        .request("GET", "/product/manifest.json", Body::empty(), None, false)
+        .await
+        .headers()["etag"]
+        .clone();
+    for sig in [None, Some("invalid signature")] {
+        let error = response_json(
+            t.upload_form(&r, "windows-x86_64", "updater.exe", Some("updater"), sig)
+                .await,
+            422,
+        )
+        .await;
+        assert_eq!(
+            error["error"]["code"],
+            if sig.is_none() {
+                "updater_signature_required"
+            } else {
+                "invalid_updater"
+            }
+        );
+        assert_eq!(t.state.releases.get(&t.app, &r.id).await.unwrap(), before);
+        assert_eq!(
+            t.request("GET", "/product/manifest.json", Body::empty(), None, false)
+                .await
+                .headers()["etag"],
+            old_etag
+        );
+    }
+    let sig = signature();
+    let added = response_json(
+        t.upload_form(
+            &r,
+            "windows-x86_64",
+            "updater.exe",
+            Some("updater"),
+            Some(&sig),
+        )
+        .await,
+        201,
+    )
+    .await;
+    let updater_id = added["id"].as_str().unwrap();
+    let after_updater = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    assert_eq!(after_updater.revision, before.revision + 1);
+    assert_eq!(after_updater.published_at, before.published_at);
+    assert_eq!(after_updater.updated_at, before.updated_at);
+    let error = response_json(
+        t.upload_form(&r, "linux-x86_64", "installer.deb", Some("installer"), None)
+            .await,
+        409,
+    )
+    .await;
+    assert_eq!(error["error"]["code"], "default_installer_required");
+    assert_eq!(
+        t.state.releases.get(&t.app, &r.id).await.unwrap(),
+        after_updater
+    );
+    t.state
+        .applications
+        .set_distribution(
+            &t.actor,
+            &t.app,
+            Some(DistributionSelector {
+                target: "windows-x86_64".into(),
+                format: "exe".into(),
+                purpose: "installer".into(),
+            }),
+        )
+        .await
+        .unwrap();
+    let linux = response_json(
+        t.upload_form(&r, "linux-x86_64", "installer.deb", Some("installer"), None)
+            .await,
+        201,
+    )
+    .await;
+    let after = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    assert_eq!(after.version, before.version);
+    assert_eq!(after.published_at, before.published_at);
+    assert_eq!(after.updated_at, before.updated_at);
+    assert_eq!(after.revision, before.revision + 2);
+    assert_eq!(after.channels, before.channels);
+    assert_eq!(
+        t.call("GET", &format!("{}/channels", t.base()), Value::Null, 200)
+            .await,
+        channels
+    );
+    assert_eq!(
+        t.call(
+            "GET",
+            &format!("{}/publication-history", t.base()),
+            Value::Null,
+            200
+        )
+        .await,
+        history
+    );
+    let response = t
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/product/manifest.json")
+                .header("if-none-match", &old_etag)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(response.headers()["etag"], old_etag);
+    let manifest = response_json(response, 200).await;
+    let files = manifest["releases"][0]["artifacts"].as_array().unwrap();
+    assert_eq!(files.len(), 3);
+    for (id, purpose) in [
+        (installer.id.as_str(), "installer"),
+        (updater_id, "updater"),
+        (linux["id"].as_str().unwrap(), "installer"),
+    ] {
+        let file = files.iter().find(|a| a["id"] == id).unwrap();
+        assert_eq!(file["purpose"], purpose);
+        let url = file["download_url"]
+            .as_str()
+            .unwrap()
+            .strip_prefix(&t.config.download.public_base_url)
+            .unwrap();
+        for method in ["GET", "HEAD"] {
+            let response = t.request(method, url, Body::empty(), None, false).await;
+            assert_eq!(response.status(), 200);
+            assert_eq!(response.headers()["content-length"], "7");
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            assert_eq!(
+                bytes.as_ref(),
+                if method == "GET" {
+                    b"package".as_slice()
+                } else {
+                    b"".as_slice()
+                }
+            );
+        }
+    }
+    for (query, id) in [
+        ("", installer.id.as_str()),
+        ("?target=windows-x86_64&format=exe", installer.id.as_str()),
+        (
+            "?purpose=updater&target=windows-x86_64&format=exe",
+            updater_id,
+        ),
+        ("?target=linux-x86_64", linux["id"].as_str().unwrap()),
+    ] {
+        let response = t
+            .request(
+                "GET",
+                &format!("/product/latest{query}"),
+                Body::empty(),
+                None,
+                false,
+            )
+            .await;
+        assert_eq!(response.status(), 307);
+        assert!(
+            response.headers()["location"]
+                .to_str()
+                .unwrap()
+                .contains(id)
+        );
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
+    let update = t
+        .call(
+            "GET",
+            "/api/v1/updates/tauri/product/stable/windows/x86_64/0.4.0",
+            Value::Null,
+            200,
+        )
+        .await;
+    assert!(update["url"].as_str().unwrap().contains(updater_id));
+    assert_eq!(update["signature"], sig);
+    assert_eq!(update["version"], "0.5.0");
+}
+#[tokio::test]
+async fn published_artifacts_cannot_be_replaced_even_with_sql_replace() {
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    let a = t.upload(&r, "windows-x86_64", "installer.exe").await;
+    t.publish(&r, "stable").await;
+    let before = t.state.artifacts.list(&t.app, &r.id).await.unwrap();
+    for column in [
+        "filename='renamed.exe'",
+        "target='any'",
+        "file_type='zip'",
+        "size_bytes=size_bytes+1",
+        "sha256=lower(hex(randomblob(32)))",
+        "storage_key=lower(hex(randomblob(16)))||'.blob'",
+        "distribution_role='updater'",
+        "updater_signature=NULL",
+        "id=lower(hex(randomblob(18)))",
+    ] {
+        assert!(
+            sqlx::query(&format!("UPDATE artifacts SET {column} WHERE id=?"))
+                .bind(&a.id)
+                .execute(&t.state.database)
+                .await
+                .is_err(),
+            "{column}"
+        );
+    }
+    // Same ID, storage key, installer tuple or updater target must never remove a published row.
+    for (id, key) in [
+        (
+            a.id.clone(),
+            format!("{}.blob", uuid::Uuid::new_v4().simple()),
+        ),
+        (uuid::Uuid::new_v4().to_string(), a.storage_key.clone()),
+        (
+            uuid::Uuid::new_v4().to_string(),
+            format!("{}.blob", uuid::Uuid::new_v4().simple()),
+        ),
+    ] {
+        assert!(sqlx::query("INSERT OR REPLACE INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at) VALUES(?,?,'replacement.exe','windows-x86_64','exe',7,?,?,1)").bind(id).bind(&r.id).bind(&a.sha256).bind(key).execute(&t.state.database).await.is_err());
+    }
+    t.call("DELETE", &t.artifact_path(&r, &a), Value::Null, 409)
+        .await;
+    t.call(
+        "PUT",
+        &format!("{}/updater", t.artifact_path(&r, &a)),
+        json!({"distribution_role":"updater"}),
+        409,
+    )
+    .await;
+    for (method, suffix) in [("PUT", ""), ("POST", ""), ("PUT", "/download")] {
+        t.call(
+            method,
+            &format!("{}{suffix}", t.artifact_path(&r, &a)),
+            Value::Null,
+            405,
+        )
+        .await;
+    }
+    assert_eq!(t.state.artifacts.list(&t.app, &r.id).await.unwrap(), before);
+    for sql in [
+        "UPDATE releases SET title='Changed',revision=revision+1",
+        "UPDATE releases SET updated_at=updated_at+1,revision=revision+1",
+        "UPDATE releases SET version='0.6.0',version_key='0.6.0',revision=revision+1",
+        "UPDATE releases SET published_at=published_at+1,revision=revision+1",
+    ] {
+        assert!(sqlx::query(sql).execute(&t.state.database).await.is_err());
+    }
+}
+#[tokio::test]
+async fn append_races_serialize_conflicts_and_publication_rules() {
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    t.upload(&r, "windows-x86_64", "installer.exe").await;
+    let metadata = || UploadMetadata {
+        filename: "updater.exe".into(),
+        target: "windows-x86_64".into(),
+        file_type: None,
+        distribution_role: Some("updater".into()),
+    };
+    let mut unsigned = t
+        .state
+        .artifacts
+        .begin(&t.actor, &t.app, &r.id, metadata())
+        .await
+        .unwrap();
+    unsigned.write(b"unsigned").await.unwrap();
+    t.publish(&r, "stable").await;
+    assert!(matches!(
+        t.state.artifacts.complete(&t.actor, unsigned).await,
+        Err(ServiceError::UpdaterSignatureRequired)
+    ));
+    let mut one = t
+        .state
+        .artifacts
+        .begin(&t.actor, &t.app, &r.id, metadata())
+        .await
+        .unwrap();
+    let mut two = t
+        .state
+        .artifacts
+        .begin(&t.actor, &t.app, &r.id, metadata())
+        .await
+        .unwrap();
+    for pending in [&mut one, &mut two] {
+        pending.write(b"signed").await.unwrap();
+        pending.set_signature(signature().as_bytes()).unwrap();
+    }
+    let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    let (one, two) = tokio::join!(
+        t.state.artifacts.complete(&t.actor, one),
+        t.state.artifacts.complete(&t.actor, two)
+    );
+    assert!(matches!(
+        (&one, &two),
+        (Ok(_), Err(ServiceError::ArtifactConflict)) | (Err(ServiceError::ArtifactConflict), Ok(_))
+    ));
+    assert_eq!(
+        t.state.releases.get(&t.app, &r.id).await.unwrap().revision,
+        before.revision + 1
+    );
+    assert_eq!(
+        t.state.artifacts.list(&t.app, &r.id).await.unwrap().len(),
+        2
+    );
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&t.state.database)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn published_installer_addition_preserves_filtered_latest_and_can_follow_updater() {
+    use veruna_releases::domain::application::DistributionSelector;
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    response_json(
+        t.upload_form(
+            &r,
+            "windows-x86_64",
+            "update.exe",
+            Some("updater"),
+            Some(&signature()),
+        )
+        .await,
+        201,
+    )
+    .await;
+    t.publish(&r, "stable").await;
+    // A published release initially containing only an updater can gain an installer.
+    response_json(
+        t.upload_form(
+            &r,
+            "windows-x86_64",
+            "installer.exe",
+            Some("installer"),
+            None,
+        )
+        .await,
+        201,
+    )
+    .await;
+    t.state
+        .applications
+        .set_distribution(
+            &t.actor,
+            &t.app,
+            Some(DistributionSelector {
+                target: "windows-x86_64".into(),
+                format: "exe".into(),
+                purpose: "installer".into(),
+            }),
+        )
+        .await
+        .unwrap();
+    response_json(
+        t.upload_form(&r, "linux-x86_64", "installer.deb", None, None)
+            .await,
+        201,
+    )
+    .await;
+    // The global default still resolves, but /latest?target=linux-x86_64 would break.
+    let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    assert_eq!(
+        response_json(
+            t.upload_form(&r, "linux-x86_64", "installer.rpm", None, None)
+                .await,
+            409
+        )
+        .await["error"]["code"],
+        "default_installer_required"
+    );
+    assert_eq!(t.state.releases.get(&t.app, &r.id).await.unwrap(), before);
+    // Multiple installer formats on the default target remain supported.
+    response_json(
+        t.upload_form(&r, "windows-x86_64", "installer.msi", None, None)
+            .await,
+        201,
+    )
+    .await;
+}
+#[tokio::test]
+async fn failed_published_append_rolls_back_and_reclaims_file_and_rechecks_live_access() {
+    use veruna_releases::domain::application::Status;
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.publish(&r, "stable").await;
+    let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_revision BEFORE UPDATE OF revision ON releases BEGIN SELECT RAISE(ABORT,'test rollback'); END").execute(&t.state.database).await.unwrap();
+    response_json(
+        t.upload_form(
+            &r,
+            "windows-x86_64",
+            "update.exe",
+            Some("updater"),
+            Some(&signature()),
+        )
+        .await,
+        500,
+    )
+    .await;
+    assert_eq!(t.state.releases.get(&t.app, &r.id).await.unwrap(), before);
+    assert_eq!(
+        t.state.artifacts.list(&t.app, &r.id).await.unwrap(),
+        vec![a]
+    );
+    for _ in 0..100 {
+        if std::fs::read_dir(&t.config.storage.directory)
+            .unwrap()
+            .count()
+            == 2
+            && std::fs::read_dir(t.config.storage.temporary_directory())
+                .unwrap()
+                .count()
+                == 0
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        std::fs::read_dir(&t.config.storage.directory)
+            .unwrap()
+            .count(),
+        2
+    ); // .tmp and original object
+    assert_eq!(
+        std::fs::read_dir(t.config.storage.temporary_directory())
+            .unwrap()
+            .count(),
+        0
+    );
+    sqlx::query("DROP TRIGGER fail_revision")
+        .execute(&t.state.database)
+        .await
+        .unwrap();
+    let metadata = || UploadMetadata {
+        filename: "update.exe".into(),
+        target: "windows-x86_64".into(),
+        file_type: None,
+        distribution_role: Some("updater".into()),
+    };
+    let mut pending = t
+        .state
+        .artifacts
+        .begin(&t.actor, &t.app, &r.id, metadata())
+        .await
+        .unwrap();
+    pending.set_signature(signature().as_bytes()).unwrap();
+    pending.write(b"package").await.unwrap();
+    t.state
+        .applications
+        .set_status(&t.actor, &t.app, Status::Archived)
+        .await
+        .unwrap();
+    assert!(matches!(
+        t.state.artifacts.complete(&t.actor, pending).await,
+        Err(ServiceError::ReleaseLocked)
+    ));
+    t.state
+        .applications
+        .set_status(&t.actor, &t.app, Status::Active)
+        .await
+        .unwrap();
+    let mut pending = t
+        .state
+        .artifacts
+        .begin(&t.actor, &t.app, &r.id, metadata())
+        .await
+        .unwrap();
+    pending.set_signature(signature().as_bytes()).unwrap();
+    pending.write(b"package").await.unwrap();
+    let path = format!("{}/artifacts", t.release_path(&r));
+    assert_eq!(
+        t.request("POST", &path, Body::empty(), None, false)
+            .await
+            .status(),
+        401
+    );
+    assert_eq!(
+        t.request("POST", &path, Body::empty(), Some(&t.token), false)
+            .await
+            .status(),
+        403
+    );
+    t.state
+        .users
+        .create(
+            &t.actor,
+            "operator",
+            Role::Operator,
+            Some("test-password-123".into()),
+        )
+        .await
+        .unwrap();
+    let operator = t
+        .state
+        .authentication
+        .login("operator", "test-password-123".into(), None)
+        .await
+        .unwrap()
+        .token;
+    assert_eq!(
+        t.request("POST", &path, Body::empty(), Some(&operator), true)
+            .await
+            .status(),
+        403
+    );
+    t.state.sessions.logout(&t.actor).await.unwrap();
+    assert!(matches!(
+        t.state.artifacts.complete(&t.actor, pending).await,
+        Err(ServiceError::Unauthorized)
+    ));
+    assert_eq!(t.state.releases.get(&t.app, &r.id).await.unwrap(), before);
 }

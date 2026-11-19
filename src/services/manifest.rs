@@ -27,6 +27,7 @@ pub struct ManifestArtifact {
     pub id: String,
     pub target: String,
     pub format: String,
+    pub purpose: String,
     pub size_bytes: i64,
     pub sha256: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,19 +56,18 @@ impl ManifestGeneration {
         if !(1..=100).contains(&limit) {
             return Err(ServiceError::Invalid);
         }
-        let (app, _, current) = self.distribution.current(key, channel, public).await?;
-        let current = current.ok_or(ServiceError::NotFound)?;
-        let latest = current.release.version.to_string();
-        let mut releases = vec![(current.release, current.artifacts)];
         let history = self
             .distribution
-            .history(key, channel, public, limit, 0)
+            .manifest_history(key, channel, public, limit)
             .await?;
-        for item in history.releases {
-            if item.0.id != releases[0].0.id && releases.len() < limit as usize {
-                releases.push(item);
-            }
-        }
+        let app = history.application;
+        let releases = history.releases;
+        let latest = releases
+            .first()
+            .ok_or(ServiceError::NotFound)?
+            .0
+            .version
+            .to_string();
         let available = app.status == Status::Active && app.visibility == Visibility::Public;
         let mut documents = Vec::new();
         for (release, artifacts) in releases {
@@ -82,6 +82,7 @@ impl ManifestGeneration {
                     id: a.id,
                     target: a.target,
                     format: a.file_type,
+                    purpose: a.distribution_role,
                     size_bytes: a.size_bytes,
                     sha256: a.sha256,
                 });

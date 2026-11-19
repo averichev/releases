@@ -80,6 +80,38 @@ pub fn select_artifact(
         }
     }
 }
+/// An append must preserve previously resolvable installer links, including
+/// target/format filters. Only queries that can match the new file can change.
+pub fn check_installer_addition(
+    artifacts: &[Artifact],
+    added: &Artifact,
+    default: Option<&DistributionSelector>,
+) -> Result<()> {
+    if added.distribution_role != "installer" {
+        return Ok(());
+    }
+    let mut next = artifacts.to_vec();
+    next.push(added.clone());
+    for target in [None, Some(added.target.clone())] {
+        for format in [None, Some(added.file_type.clone())] {
+            let query = ArtifactSelection {
+                target: target.clone(),
+                format,
+                purpose: None,
+            };
+            if (query.target.is_none() && query.format.is_none()
+                || select_artifact(artifacts, &query, default).is_ok())
+                && matches!(
+                    select_artifact(&next, &query, default),
+                    Err(ServiceError::AmbiguousArtifact)
+                )
+            {
+                return Err(ServiceError::DefaultInstallerRequired);
+            }
+        }
+    }
+    Ok(())
+}
 pub struct DistributionHistory {
     pub application: Application,
     pub channel: ReleaseChannel,
@@ -162,7 +194,36 @@ impl PublicDistribution {
         }
         let (application, channel, releases, total) = self
             .repository
-            .history(key, name, public, limit, offset)
+            .history(key, name, public, limit, offset, false)
+            .await?;
+        if public {
+            public_application(&application)?;
+        }
+        Ok(DistributionHistory {
+            application,
+            channel,
+            releases,
+            total,
+        })
+    }
+    /// Current pointer, release metadata and artifact lists share one read snapshot.
+    pub async fn manifest_history(
+        &self,
+        key: &str,
+        name: &str,
+        public: bool,
+        limit: u32,
+    ) -> Result<DistributionHistory> {
+        channel(name)?;
+        if !(1..=100).contains(&limit) {
+            return Err(ServiceError::Invalid);
+        }
+        if public && !valid_slug(key) {
+            return Err(ServiceError::NotFound);
+        }
+        let (application, channel, releases, total) = self
+            .repository
+            .history(key, name, public, limit, 0, true)
             .await?;
         if public {
             public_application(&application)?;
@@ -185,8 +246,11 @@ impl PublicDistribution {
     ) -> Result<PublicDownload> {
         let (_, _, snapshot) = self.current(slug, name, true).await?;
         let snapshot = snapshot.ok_or(ServiceError::NotFound)?;
-        let default = self.default_selector(&snapshot.application.id).await?;
-        let artifact = select_artifact(&snapshot.artifacts, query, default.as_ref())?;
+        let artifact = select_artifact(
+            &snapshot.artifacts,
+            query,
+            snapshot.default_distribution.as_ref(),
+        )?;
         self.authorize_download(snapshot, artifact).await
     }
     pub async fn version(
@@ -211,8 +275,11 @@ impl PublicDistribution {
                 .cloned()
                 .ok_or(ServiceError::NotFound)?
         } else {
-            let default = self.default_selector(&snapshot.application.id).await?;
-            select_artifact(&snapshot.artifacts, query, default.as_ref())?
+            select_artifact(
+                &snapshot.artifacts,
+                query,
+                snapshot.default_distribution.as_ref(),
+            )?
         };
         self.authorize_download(snapshot, artifact).await
     }

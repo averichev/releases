@@ -137,24 +137,53 @@ async fn upload(
     let mut target = None;
     let mut file_type = None;
     let mut upload = None;
+    let mut role = None;
+    let mut signature = None;
     while let Some(mut field) = timeout(idle, multipart.next_field())
         .await
         .map_err(|_| ApiError::UploadTimeout)?
         .map_err(multipart_error)?
     {
-        if upload.is_some() {
-            return Err(ApiError::InvalidArtifact);
-        }
         // Parsing a header and consuming its field are separate bounded phases.
         budget.headers();
         match field.name() {
-            Some("target") if target.is_none() && field.file_name().is_none() => {
+            Some("target")
+                if upload.is_none() && target.is_none() && field.file_name().is_none() =>
+            {
                 target = Some(text(&mut field, idle).await?)
             }
-            Some("file_type") if file_type.is_none() && field.file_name().is_none() => {
+            Some("file_type")
+                if upload.is_none() && file_type.is_none() && field.file_name().is_none() =>
+            {
                 file_type = Some(text(&mut field, idle).await?)
             }
-            Some("file") => {
+            Some("distribution_role")
+                if upload.is_none() && role.is_none() && field.file_name().is_none() =>
+            {
+                role = Some(text(&mut field, idle).await?);
+            }
+            Some("signature") if signature.is_none() => {
+                if !field
+                    .file_name()
+                    .is_some_and(|name| name.to_ascii_lowercase().ends_with(".sig"))
+                {
+                    return Err(ApiError::InvalidUpdater);
+                }
+                budget.file(state.storage_config.max_request_bytes);
+                let mut bytes = Vec::new();
+                while let Some(chunk) = timeout(idle, field.chunk())
+                    .await
+                    .map_err(|_| ApiError::UploadTimeout)?
+                    .map_err(multipart_error)?
+                {
+                    if bytes.len() + chunk.len() > crate::services::updater::MAX_SIGNATURE_BYTES {
+                        return Err(ApiError::PayloadTooLarge);
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                signature = Some(bytes);
+            }
+            Some("file") if upload.is_none() => {
                 let filename = field
                     .file_name()
                     .ok_or(ApiError::InvalidArtifact)?
@@ -170,6 +199,7 @@ async fn upload(
                             filename,
                             target: target.take().ok_or(ApiError::InvalidArtifact)?,
                             file_type: file_type.take(),
+                            distribution_role: role.take(),
                         },
                     )
                     .await?;
@@ -186,10 +216,11 @@ async fn upload(
         }
         budget.headers();
     }
-    let result = state
-        .artifacts
-        .complete(&actor, upload.ok_or(ApiError::InvalidArtifact)?)
-        .await?;
+    let mut upload = upload.ok_or(ApiError::InvalidArtifact)?;
+    if let Some(bytes) = signature {
+        upload.set_signature(&bytes)?;
+    }
+    let result = state.artifacts.complete(&actor, upload).await?;
     Ok((StatusCode::CREATED, Json(result.into())))
 }
 async fn download(

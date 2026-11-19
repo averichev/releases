@@ -61,7 +61,7 @@ export default function ReleaseDetail() {
       <Descriptions column={{ xs: 1, md: 2 }} size="small" items={[{ key: 'created', label: 'Создан', children: date(release.created_at) }, { key: 'updated', label: 'Изменён', children: date(release.updated_at) }, { key: 'files', label: 'Файлы', children: release.artifact_count }, { key: 'size', label: 'Общий размер', children: size(release.total_size_bytes) }, ...(release.status === 'published' ? [{ key: 'published', label: 'Опубликован', children: date(release.published_at!) }, { key: 'channels', label: 'Каналы', children: release.channels?.join(', ') || '—' }] : [])]} />
     </Card>
     {editable && <ReleasePublication app={id} release={release} disabled={busy || uploadBusy} onChange={refresh} />}
-    <Card className="release-artifacts" title="Артефакты" extra={<Space wrap><Button loading={refreshBusy} onClick={() => { setError(''); void refresh(); }}>Обновить список</Button>{editable && <Button type="primary" disabled={busy} onClick={() => setUploading(true)}>Загрузить файл</Button>}</Space>}>
+    <Card className="release-artifacts" title="Артефакты" extra={<Space wrap><Button loading={refreshBusy} onClick={() => { setError(''); void refresh(); }}>Обновить список</Button>{administrator && <Button type="primary" disabled={busy} onClick={() => setUploading(true)}>Добавить артефакт</Button>}</Space>}>
       <Table<Artifact> rowKey="id" dataSource={artifacts} pagination={false} scroll={{ x: 1100 }} locale={{ emptyText: <Empty description="Файлов пока нет" /> }} columns={[
         { title: 'Имя файла', dataIndex: 'filename', render: (value: string) => <span className="artifact-filename">{value}</span> }, { title: 'Платформа', dataIndex: 'target', render: targetName }, { title: 'Формат', dataIndex: 'file_type', render: (value: string) => value.toUpperCase() },
         { title: 'Назначение / подпись', render: (_, artifact) => <ArtifactUpdater app={id} release={releaseId} artifact={artifact} editable={editable} disabled={busy || uploadBusy} onChange={refresh} onError={setError} /> },
@@ -69,17 +69,17 @@ export default function ReleaseDetail() {
         { title: 'Загружен', dataIndex: 'created_at', render: date }, { title: 'Действия', render: (_, artifact) => <Space orientation="vertical"><a href={`/api/v1${artifactsPath(id, releaseId)}/${artifact.id}/download`}>Скачать</a>{administrator && <><Button type="link" size="small" disabled={busy || uploadBusy} onClick={() => { void verify(artifact); }}>Проверить SHA-256</Button>{editable && <Button type="link" size="small" danger disabled={busy || uploadBusy} onClick={() => remove(artifact)}>Удалить</Button>}</>}</Space> },
       ]} />
     </Card>
-    {release.status === 'published' && <PublishedDistribution app={id} release={releaseId} />}
+    {release.status === 'published' && <PublishedDistribution app={id} release={releaseId} revision={release.revision} />}
     {editable && <Card className="release-delete" title="Удаление черновика"><Typography.Paragraph type="secondary">Удаляется релиз вместе с установщиками.</Typography.Paragraph><Button danger disabled={busy || uploadBusy} onClick={() => remove()}>Удалить черновик</Button></Card>}
     <Modal title="Редактирование релиза" open={editing} footer={null} destroyOnHidden closable={!busy} keyboard={!busy} mask={{ closable: !busy }} onCancel={() => { if (!busy) setEditing(false); }}>{error && <Alert className="form-alert" type="error" title={error} showIcon />}<ReleaseForm release={release} busy={busy} onSubmit={(values) => { void update(values); }} /></Modal>
-    <Modal title="Загрузка дистрибутива" open={uploading} footer={null} destroyOnHidden closable={!uploadBusy} keyboard={!uploadBusy} mask={{ closable: !uploadBusy }} onCancel={() => { if (!uploadBusy) setUploading(false); }}><ArtifactUploader applicationId={id} releaseId={releaseId} artifacts={artifacts} options={options} onChange={() => { void refresh(); }} onBusy={setUploadBusy} /></Modal>
+    <Modal title="Загрузка дистрибутива" open={uploading} footer={null} destroyOnHidden closable={!uploadBusy} keyboard={!uploadBusy} mask={{ closable: !uploadBusy }} onCancel={() => { if (!uploadBusy) setUploading(false); }}><ArtifactUploader applicationId={id} releaseId={releaseId} artifacts={artifacts} options={options} published={release.status === 'published'} onChange={() => { void refresh(); }} onBusy={setUploadBusy} /></Modal>
   </>;
 }
 
 interface ReleaseDistribution { public_available: boolean; files: {id: string; url: string | null; tauri_compatible: boolean; signature_present: boolean}[]; warnings: string[] }
-function PublishedDistribution({ app, release }: {app: string; release: string}) {
+function PublishedDistribution({ app, release, revision }: {app: string; release: string; revision: number}) {
   const [data, setData] = useState<ReleaseDistribution>(); const [error, setError] = useState(''); const [attempt, setAttempt] = useState(0);
-  useEffect(() => {const c = new AbortController(); setData(undefined); setError(''); api<ReleaseDistribution>(`${applicationPath(app)}/distribution/releases/${encodeURIComponent(release)}`, 'GET', undefined, c.signal).then((v) => {if (!c.signal.aborted) setData(v);}, (e) => {if (!c.signal.aborted) setError(releaseError(e));}); return () => c.abort();}, [app, release, attempt]);
+  useEffect(() => {const c = new AbortController(); setData(undefined); setError(''); api<ReleaseDistribution>(`${applicationPath(app)}/distribution/releases/${encodeURIComponent(release)}`, 'GET', undefined, c.signal).then((v) => {if (!c.signal.aborted) setData(v);}, (e) => {if (!c.signal.aborted) setError(releaseError(e));}); return () => c.abort();}, [app, release, revision, attempt]);
   return <Card title="Публичное распространение">{error ? <Alert type="error" title={error} action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !data ? <Spin /> : <>
     {!data.public_available && <Alert className="form-alert" type="warning" title="Приложение приватное или архивировано. Публичные ссылки недоступны." />}
     {data.warnings.map((w) => <Alert key={w} className="form-alert" type="warning" title={w} />)}

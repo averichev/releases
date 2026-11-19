@@ -113,6 +113,7 @@ impl TestApp {
                     filename: name.into(),
                     target: target.into(),
                     file_type: None,
+                    distribution_role: None,
                 },
             )
             .await
