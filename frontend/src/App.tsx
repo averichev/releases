@@ -11,6 +11,7 @@ import Login from './pages/Login';
 import Activate from './pages/Activate';
 import { sections } from './sections';
 import { Brand } from './components/Brand';
+import { ServiceVersion } from './components/ServiceVersion';
 
 const { Title, Paragraph } = Typography;
 const PublicApplication = lazy(() => import('./pages/PublicApplication'));
@@ -51,7 +52,7 @@ function AdminLayout() {
           <Link to="/admin/profile"><Tag variant="filled"><UserOutlined /> {state.kind === 'ready' ? state.user.username : ''}</Tag></Link>
         </Layout.Header>
         <Layout.Content className="page-content"><Outlet /></Layout.Content>
-        <Layout.Footer className="footer"><Brand /><span>Платформа распространения ПО</span></Layout.Footer>
+        <Layout.Footer className="footer"><Brand /><span className="footer-description">Платформа распространения ПО</span><ServiceVersion /></Layout.Footer>
       </Layout>
     </Layout>
   );

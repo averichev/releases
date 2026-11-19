@@ -19,18 +19,19 @@ it('keeps protected navigation hidden until the session has been checked', async
   expect(screen.queryByRole('heading', { name: 'Пользователи' })).toBeNull();
 });
 it('restores an administrator on a nested route after reload', async () => {
-  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : [user]))));
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : url.endsWith('/health') ? {status: 'ok', service: 'veruna-releases', version: '2.3.4'} : [user]))));
   renderAt('/admin/users');
   expect(await screen.findByRole('heading', { name: 'Пользователи' })).toBeDefined();
   expect(await screen.findByRole('button', { name: /Добавить пользователя/ })).toBeDefined();
   expect(await screen.findByRole('button', { name: 'Действия: owner' })).toBeDefined();
+  expect(await screen.findByText('Версия 2.3.4')).toBeDefined();
 });
 it('hides user management for an operator and denies its direct route', async () => {
-  const fetch = vi.fn(() => Promise.resolve(response({ ...session, user: { ...user, role: 'operator' } })));
+  const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/health') ? {status: 'ok', service: 'veruna-releases', version: '2.3.4'} : { ...session, user: { ...user, role: 'operator' } })));
   vi.stubGlobal('fetch', fetch); renderAt('/admin/users');
   expect(await screen.findByText('Доступ ограничен')).toBeDefined();
   expect(screen.queryByRole('link', { name: 'Пользователи' })).toBeNull();
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/v1/admin/'))).toBe(false);
 });
 it('returns to login when the session expires', async () => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response(session)))); renderAt('/admin/releases');

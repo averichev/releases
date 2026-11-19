@@ -8,10 +8,11 @@ const release = { version: '1.0.0', published_at: '2026-11-12T10:00:00Z', notes:
 const application = { slug: 'product', name: 'Product', description: 'Описание продукта', icon_url: null, channel: 'stable', latest: release, default_artifact_id: 'file-1' };
 function renderPage() {render(<App><MemoryRouter initialEntries={['/product']}><AppRoutes /></MemoryRouter></App>);}
 it('loads public data without a session and exposes a real anchor to the file', async () => {
-  const fetch = vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(url.includes('/releases?') ? {items: [release], total: 1} : application))));
+  const fetch = vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(url.endsWith('/health') ? {status: 'ok', service: 'veruna-releases', version: '2.3.4'} : url.includes('/releases?') ? {items: [release], total: 1} : application))));
   vi.stubGlobal('fetch', fetch);renderPage();
   expect(await screen.findByRole('heading', {name: 'Product'})).toBeDefined();
   expect((await screen.findByRole('link', {name: /Скачать Product/})).getAttribute('href')).toBe(artifact.download_url);
+  expect(await screen.findByText('Версия 2.3.4')).toBeDefined();
   expect(screen.queryByRole('navigation', {name: 'Основная навигация'})).toBeNull();
   expect(fetch.mock.calls.every(([url]) => !url.includes('/auth/'))).toBe(true);
 });

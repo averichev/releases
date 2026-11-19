@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, errorMessage } from '../api/client';
 import { size, targetName } from '../api/releases';
 import { Brand } from '../components/Brand';
+import { ServiceVersion } from '../components/ServiceVersion';
 export interface PublicArtifact { id: string; filename: string; target: string; format: string; purpose: string; size_bytes: number; download_url: string }
 export interface PublicRelease { version: string; published_at: string; notes: string; artifacts: PublicArtifact[] }
 interface PublicApp { name: string; description: string; slug: string; icon_url: string | null; channel: string; latest: PublicRelease | null; default_artifact_id: string | null }
@@ -60,5 +61,5 @@ export default function PublicApplication() {
       {app.latest && <Card title="Что нового"><Typography.Paragraph className="application-full-description">{app.latest.notes || 'Описание изменений не добавлено'}</Typography.Paragraph><Space wrap>{[...new Set(app.latest.artifacts.map((a) => a.target))].map((t) => <Tag key={t}>{targetName(t)}</Tag>)}</Space></Card>}
       <section><Typography.Title level={2}>История версий</Typography.Title>{historyError ? <Alert type="error" title="Не удалось загрузить историю" description={historyError} action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !history ? <Spin aria-label="Загрузка истории" /> : <><Space orientation="vertical" className="full-width">{history.items.length ? history.items.map((r) => <Card key={r.version} title={`Версия ${r.version}`} extra={<Typography.Text type="secondary">{releaseDate(r.published_at)}</Typography.Text>}><Typography.Paragraph className="application-full-description">{r.notes || 'Описание изменений не добавлено'}</Typography.Paragraph><Files release={r} /></Card>) : <Empty description="Опубликованных версий пока нет" />}</Space>{history.total > 10 && <Pagination current={page} pageSize={10} total={history.total} onChange={setPage} showSizeChanger={false} />}</>}</section>
     </>}
-  </Layout.Content><Layout.Footer className="public-footer"><Brand /><span>Распространение приложений</span></Layout.Footer></Layout>;
+  </Layout.Content><Layout.Footer className="public-footer"><Brand /><span>Распространение приложений</span><ServiceVersion /></Layout.Footer></Layout>;
 }

@@ -34,7 +34,7 @@ it('keeps a manually chosen slug while the name changes and rejects reserved slu
   expect((screen.getByLabelText('Slug') as HTMLInputElement).value).toBe('admin');
   fireEvent.click(screen.getByRole('button', { name: 'Создать приложение' }));
   expect(await screen.findByText('Недопустимый или служебный slug. Дефис не может стоять в начале или конце.')).toBeDefined();
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch).not.toHaveBeenCalledWith('/api/v1/admin/applications', expect.anything());
 });
 it('restores a nested application route and loads real releases', async () => {
   vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : url.includes('/releases?') ? { items: [], total: 0, page: 1, per_page: 20 } : app)))); renderAt(`/admin/applications/${app.id}/releases`);
