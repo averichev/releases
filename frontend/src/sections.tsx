@@ -1,5 +1,5 @@
 import {
-  AppstoreOutlined, CloudDownloadOutlined, DeploymentUnitOutlined,
+  AppstoreOutlined, CloudDownloadOutlined,
   KeyOutlined, RocketOutlined, TeamOutlined, LineChartOutlined,
 } from '@ant-design/icons';
 
@@ -11,8 +11,7 @@ export const sections = [
     description: 'Черновики и опубликованные версии в карточках приложений.' },
   { path: 'artifacts', title: 'Дистрибутивы', icon: <CloudDownloadOutlined />,
     description: 'Установщики и контрольные суммы внутри релизов.' },
-  { path: 'channels', title: 'Каналы', icon: <DeploymentUnitOutlined />,
-    description: 'Каналы распространения и правила доставки обновлений.' },
+
   { path: 'users', title: 'Пользователи', icon: <TeamOutlined />,
     description: 'Участники команды и права доступа к управлению сервисом.' },
   { path: 'api-tokens', title: 'API-токены', icon: <KeyOutlined />,

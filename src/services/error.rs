@@ -36,8 +36,6 @@ pub enum ServiceError {
     ArtifactConflict,
     #[error("Published updater requires a signature in the same upload")]
     UpdaterSignatureRequired,
-    #[error("Configure the default installer before adding an ambiguous installer")]
-    DefaultInstallerRequired,
     #[error("Upload exceeds size limit")]
     PayloadTooLarge,
     #[error("Upload timed out")]
@@ -48,7 +46,7 @@ pub enum ServiceError {
     StorageUnavailable,
     #[error("Storage operations are busy; retry later")]
     StorageBusy,
-    #[error("Publication or channel changed; reload and review")]
+    #[error("Release changed; reload and review")]
     PublicationConflict,
     #[error("Release failed publication checks")]
     PublicationBlocked(crate::domain::publication::PublicationValidation),

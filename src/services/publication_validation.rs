@@ -5,7 +5,7 @@ use crate::{
         release::ReleaseStatus,
     },
     infrastructure::storage::{ArtifactStorage, LocalArtifactStorage},
-    repositories::channel::PublicationSnapshot,
+    repositories::distribution::PublicationSnapshot,
     services::error::{Result, ServiceError},
 };
 use std::collections::HashSet;
@@ -48,30 +48,10 @@ impl PublicationValidator {
             error("application_archived", "Приложение находится в архиве.");
         }
         if require_draft && snapshot.release.status != ReleaseStatus::Draft {
-            error(
-                "release_published",
-                "Релиз уже опубликован. Используйте переключение канала.",
-            );
-        }
-        if snapshot.channel.name == "stable" && !snapshot.release.version.pre.is_empty() {
-            error(
-                "stable_prerelease",
-                "Prerelease-версию нельзя назначить в stable.",
-            );
+            error("release_published", "Релиз уже опубликован.");
         }
         if snapshot.artifacts.is_empty() {
             error("no_artifacts", "У релиза нет файлов.");
-        }
-        // Preference is read with the publication snapshot, before the write-time
-        // revalidation performed by the publishing service.
-        if let Some(selector) = &snapshot.default_distribution
-            && !snapshot.artifacts.iter().any(|a| selector.matches(a))
-        {
-            warnings.push(PublicationIssue {
-                code: "default_distribution_missing",
-                artifact_id: None,
-                message: "В релизе отсутствует настроенный дистрибутив по умолчанию.".into(),
-            });
         }
         let mut targets = HashSet::new();
         let mut updater_targets = HashSet::new();

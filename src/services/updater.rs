@@ -103,6 +103,29 @@ pub fn select(
         artifact,
     })))
 }
+/// Published catalog is ordered once by SemVer in the distribution repository.
+/// Skip releases without a usable signed updater; installers never participate.
+pub fn select_latest(
+    catalog: &crate::repositories::distribution::PublishedCatalog,
+    target: &str,
+    version: &str,
+) -> Result<UpdateDecision> {
+    release::version(version).ok_or(ServiceError::InvalidRelease)?;
+    tauri_target(target).ok_or(ServiceError::InvalidUpdater)?;
+    let mut missing = UpdateDecision::MissingPackage;
+    for (r, artifacts) in &catalog.releases {
+        if !r.version.pre.is_empty() {
+            continue;
+        }
+        match select(r.clone(), artifacts.clone(), target, version)? {
+            available @ UpdateDecision::Available(_) => return Ok(available),
+            UpdateDecision::NoUpdate => return Ok(UpdateDecision::NoUpdate),
+            UpdateDecision::MissingPackage => (),
+            other => missing = other,
+        }
+    }
+    Ok(missing)
+}
 #[derive(Serialize)]
 pub struct TauriResponse {
     pub version: String,
@@ -143,7 +166,7 @@ pub fn response(
         .join(download_path)
         .map_err(|_| ServiceError::InvalidUpdater)?;
     if url.origin() != origin.origin()
-        || url.query().is_some_and(|q| q != "channel=beta")
+        || url.query().is_some()
         || url.fragment().is_some()
         || !url
             .path_segments()
@@ -195,17 +218,13 @@ impl TauriUpdater {
     pub async fn update(
         &self,
         slug: &str,
-        channel: &str,
         target: &str,
         version: &str,
     ) -> Result<Option<TauriResponse>> {
         release::version(version).ok_or(ServiceError::InvalidRelease)?;
         tauri_target(target).ok_or(ServiceError::InvalidUpdater)?;
-        let (_, _, snapshot) = self.distribution.current(slug, channel, true).await?;
-        let Some(s) = snapshot else {
-            return Ok(None);
-        };
-        match select(s.release, s.artifacts, target, version)? {
+        let catalog = self.distribution.published(slug, true).await?;
+        match select_latest(&catalog, target, version)? {
             UpdateDecision::NoUpdate | UpdateDecision::MissingPackage => Ok(None),
             UpdateDecision::MissingSignature | UpdateDecision::AmbiguousPackage => {
                 Err(ServiceError::UpdaterUnavailable)
@@ -214,39 +233,31 @@ impl TauriUpdater {
                 self.distribution
                     .check_artifact(&selection.artifact)
                     .await?;
-                self.distribution.recheck(&s.application.id).await?;
+                self.distribution.recheck(&catalog.application.id).await?;
                 Ok(Some(response(
                     &selection,
                     &self.distribution.config.public_base_url,
-                    &self.distribution.artifact_path(
-                        slug,
-                        &selection.release,
-                        &selection.artifact,
-                        channel,
-                    ),
+                    &self
+                        .distribution
+                        .artifact_path(slug, &selection.release, &selection.artifact),
                 )?))
             }
         }
     }
-    pub async fn preview(
-        &self,
-        app: &str,
-        channel: &str,
-        target: &str,
-        version: &str,
-    ) -> Result<TauriPreview> {
+    pub async fn preview(&self, app: &str, target: &str, version: &str) -> Result<TauriPreview> {
         release::version(version).ok_or(ServiceError::InvalidRelease)?;
         tauri_target(target).ok_or(ServiceError::InvalidUpdater)?;
-        let (app, _, snapshot) = self.distribution.current(app, channel, false).await?;
+        let catalog = self.distribution.published(app, false).await?;
+        let app = &catalog.application;
         let mut p = TauriPreview {
             state: "no_update",
-            reason: "empty_channel",
-            message: "В канале нет опубликованного релиза.",
+            reason: "no_published_releases",
+            message: "Нет опубликованных релизов.",
             selected_version: None,
             artifact_id: None,
             artifact_filename: None,
             signature_present: false,
-            public_downloads_available: public_application(&app).is_ok(),
+            public_downloads_available: public_application(app).is_ok(),
             response: None,
         };
         if !p.public_downloads_available {
@@ -255,14 +266,14 @@ impl TauriUpdater {
             p.message = "Приложение приватное или архивировано. Публичный updater недоступен.";
             return Ok(p);
         }
-        let Some(s) = snapshot else {
+        if catalog.releases.is_empty() {
             return Ok(p);
-        };
-        p.selected_version = Some(s.release.version.to_string());
-        match select(s.release, s.artifacts, target, version)? {
+        }
+        match select_latest(&catalog, target, version)? {
             UpdateDecision::NoUpdate => {
                 p.reason = "version_not_newer";
-                p.message = "Версия канала не новее версии клиента. Downgrade не выполняется.";
+                p.message =
+                    "Опубликованная версия не новее версии клиента. Downgrade не выполняется.";
             }
             UpdateDecision::MissingPackage => {
                 p.reason = "updater_package_missing";
@@ -279,6 +290,7 @@ impl TauriUpdater {
                 p.message = "Платформе соответствует несколько updater-пакетов.";
             }
             UpdateDecision::Available(selection) => {
+                p.selected_version = Some(selection.release.version.to_string());
                 p.artifact_id = Some(selection.artifact.id.clone());
                 p.artifact_filename = Some(selection.artifact.filename.clone());
                 p.signature_present = true;
@@ -294,7 +306,6 @@ impl TauriUpdater {
                                 &app.slug,
                                 &selection.release,
                                 &selection.artifact,
-                                channel,
                             ),
                         )?);
                     }

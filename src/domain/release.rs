@@ -33,7 +33,6 @@ pub struct Release {
     pub created_at: i64,
     pub updated_at: i64,
     pub published_at: Option<i64>,
-    pub channels: Vec<String>,
     pub artifact_count: i64,
     pub total_size_bytes: i64,
 }

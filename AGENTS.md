@@ -6,7 +6,7 @@
 
 - Это независимая платформа распространения разных программных продуктов. Не зашивай имена, версии, платформы или протоколы конкретного продукта в основу сервиса.
 - Один Rust package, один исполняемый файл, SQLite и отдельный каталог дистрибутивов. Не вводи workspace, микросервисы, DI-контейнер, универсальный CRUD или repository framework без реальной необходимости.
-- Этап 6 добавляет публичные страницы/API, постоянные URL, GET/HEAD/Range, direct/Nginx delivery и Tauri Updater поверх существующих публикаций/каналов этапа 5. Статистика, CI/CD и private updates остаются вне этапа. Не добавляй фиктивные данные, модели с предположительными полями и функции-заглушки, возвращающие успех.
+- Этап 6 добавляет публичные страницы/API, постоянные URL, GET/HEAD/Range, direct/Nginx delivery и Tauri Updater поверх существующих публикаций этапа 5. Статистика, CI/CD и private updates остаются вне этапа. Не добавляй фиктивные данные, модели с предположительными полями и функции-заглушки, возвращающие успех.
 - Будущие сущности: ApiToken, DownloadEvent. Добавляй их вместе с конкретным use case и инвариантами.
 
 ## Backend
@@ -74,8 +74,8 @@ python3 scripts/smoke.py
 
 ## Публичное распространение
 
-- Разрешение current — только PublicDistribution.current и явный указатель существующего канала; выбор артефакта — общий select_artifact. Не выбирай максимальную версию отдельно в handlers/updater.
-- Все публичные download проходят PublicDistribution и delivery; не обходи public/active/published/membership/ownership проверки даже для HEAD/304/Range. Beta выбирается явно.
+- Каталог опубликованных версий и порядок SemVer — через PublicDistribution; latest installer определяется отдельно для target/формата, updater — по совместимому подписанному пакету. Не дублируй выбор версий в handlers.
+- Все публичные download проходят PublicDistribution и delivery; не обходи public/active/published/ownership проверки даже для HEAD/304/Range. Prerelease исключены из автоматического latest и updater.
 - URL строятся от download.public_base_url, разрешённого для текущего запроса в HTTP middleware: по умолчанию проверенный Host и HTTPS от loopback proxy, необязательный явный URL имеет приоритет. Не сохраняй домен запроса в общем состоянии. /latest — 307/no-store; файлам не назначай долгие публичные TTL.
 - Полный SHA-256 выполняется при хранении/публикации и явной проверке. Публичные запросы проверяют key/regular-file/no-symlink/size без повторного чтения гигабайтов.
 - Nginx alias только internal, disable_symlinks on, доверенный storage key. Конфигурацию проверяет scripts/smoke_nginx.py; у Nginx нет прав записи.

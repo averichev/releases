@@ -2,28 +2,17 @@
 use crate::{
     config::DownloadConfig,
     domain::{
-        application::{Application, DistributionSelector, Status, Visibility, valid_slug},
+        application::{Application, Status, Visibility, valid_slug},
         artifact::Artifact,
-        publication::ReleaseChannel,
         release::{Release, ReleaseStatus},
     },
     infrastructure::storage::{ArtifactStorage, LocalArtifactStorage},
-    repositories::{
-        channel::{ChannelsRepository, PublicationSnapshot},
-        distribution::DistributionRepository,
-    },
+    repositories::distribution::{DistributionRepository, PublicationSnapshot, PublishedCatalog},
     services::error::{Result, ServiceError},
 };
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-pub fn channel(value: &str) -> Result<()> {
-    if matches!(value, "stable" | "beta") {
-        Ok(())
-    } else {
-        Err(ServiceError::Invalid)
-    }
-}
 pub fn public_application(app: &Application) -> Result<()> {
     if app.status == Status::Active && app.visibility == Visibility::Public {
         Ok(())
@@ -37,12 +26,8 @@ pub struct ArtifactSelection {
     pub format: Option<String>,
     pub purpose: Option<String>,
 }
-/// Apply explicit filters first; a default must never override a user's target.
-pub fn select_artifact(
-    artifacts: &[Artifact],
-    query: &ArtifactSelection,
-    default: Option<&DistributionSelector>,
-) -> Result<Artifact> {
+/// Resolve one role and explicit filters; ambiguous formats remain downloadable by ID.
+fn validate_selection(query: &ArtifactSelection) -> Result<()> {
     if query
         .target
         .as_ref()
@@ -58,6 +43,10 @@ pub fn select_artifact(
     {
         return Err(ServiceError::InvalidArtifact);
     }
+    Ok(())
+}
+pub fn select_artifact(artifacts: &[Artifact], query: &ArtifactSelection) -> Result<Artifact> {
+    validate_selection(query)?;
     let candidates: Vec<_> = artifacts
         .iter()
         .filter(|a| {
@@ -69,54 +58,36 @@ pub fn select_artifact(
     match candidates.as_slice() {
         [] => Err(ServiceError::NotFound),
         [only] => Ok((*only).clone()),
-        _ => {
-            if let Some(s) = default {
-                let selected: Vec<_> = candidates.into_iter().filter(|a| s.matches(a)).collect();
-                if let [only] = selected.as_slice() {
-                    return Ok((*only).clone());
-                }
-            }
-            Err(ServiceError::AmbiguousArtifact)
-        }
+        _ => Err(ServiceError::AmbiguousArtifact),
     }
-}
-/// An append must preserve previously resolvable installer links, including
-/// target/format filters. Only queries that can match the new file can change.
-pub fn check_installer_addition(
-    artifacts: &[Artifact],
-    added: &Artifact,
-    default: Option<&DistributionSelector>,
-) -> Result<()> {
-    if added.distribution_role != "installer" {
-        return Ok(());
-    }
-    let mut next = artifacts.to_vec();
-    next.push(added.clone());
-    for target in [None, Some(added.target.clone())] {
-        for format in [None, Some(added.file_type.clone())] {
-            let query = ArtifactSelection {
-                target: target.clone(),
-                format,
-                purpose: None,
-            };
-            if (query.target.is_none() && query.format.is_none()
-                || select_artifact(artifacts, &query, default).is_ok())
-                && matches!(
-                    select_artifact(&next, &query, default),
-                    Err(ServiceError::AmbiguousArtifact)
-                )
-            {
-                return Err(ServiceError::DefaultInstallerRequired);
-            }
-        }
-    }
-    Ok(())
 }
 pub struct DistributionHistory {
     pub application: Application,
-    pub channel: ReleaseChannel,
     pub releases: Vec<(Release, Vec<Artifact>)>,
     pub total: i64,
+}
+/// Latest installers for each target, retaining all formats of that version.
+pub fn latest_installers(
+    catalog: &PublishedCatalog,
+) -> std::collections::BTreeMap<String, (Release, Vec<Artifact>)> {
+    let mut targets = std::collections::BTreeMap::new();
+    for (release, artifacts) in &catalog.releases {
+        if !release.version.pre.is_empty() {
+            continue;
+        }
+        for a in artifacts
+            .iter()
+            .filter(|a| a.distribution_role == "installer")
+        {
+            let entry = targets
+                .entry(a.target.clone())
+                .or_insert_with(|| (release.clone(), Vec::new()));
+            if entry.0.id == release.id {
+                entry.1.push(a.clone());
+            }
+        }
+    }
+    targets
 }
 /// One context for every public download, ready for future request-level analytics.
 /// It intentionally does not equate GET, HEAD, ranges or redirects to installations.
@@ -124,12 +95,10 @@ pub struct PublicDownload {
     pub application: Application,
     pub release: Release,
     pub artifact: Artifact,
-    pub channel: String,
 }
 #[derive(Clone)]
 pub struct PublicDistribution {
     repository: DistributionRepository,
-    channels: ChannelsRepository,
     storage: LocalArtifactStorage,
     pub config: DownloadConfig,
     workers: Arc<Semaphore>,
@@ -137,14 +106,12 @@ pub struct PublicDistribution {
 impl PublicDistribution {
     pub fn new(
         repository: DistributionRepository,
-        channels: ChannelsRepository,
         storage: LocalArtifactStorage,
         config: DownloadConfig,
     ) -> Self {
         Self {
             workers: Arc::new(Semaphore::new(config.max_concurrent_downloads)),
             repository,
-            channels,
             storage,
             config,
         }
@@ -159,113 +126,79 @@ impl PublicDistribution {
         }
         Ok(app)
     }
-    pub async fn current(
-        &self,
-        key: &str,
-        name: &str,
-        public: bool,
-    ) -> Result<(Application, ReleaseChannel, Option<PublicationSnapshot>)> {
-        channel(name)?;
+    pub async fn published(&self, key: &str, public: bool) -> Result<PublishedCatalog> {
         if public && !valid_slug(key) {
             return Err(ServiceError::NotFound);
         }
-        let (app, channel, snapshot) = self.channels.current_snapshot(key, name, public).await?;
+        let catalog = self.repository.published(key, public).await?;
         if public {
-            public_application(&app)?;
+            public_application(&catalog.application)?;
         }
-        if let Some(s) = &snapshot
-            && s.release.status != ReleaseStatus::Published
-        {
-            return Err(ServiceError::NotFound);
-        }
-        Ok((app, channel, snapshot))
+        Ok(catalog)
     }
     pub async fn history(
         &self,
         key: &str,
-        name: &str,
         public: bool,
         limit: u32,
         offset: u32,
     ) -> Result<DistributionHistory> {
-        channel(name)?;
         if !(1..=100).contains(&limit) || offset > 100_000 {
             return Err(ServiceError::Invalid);
         }
-        let (application, channel, releases, total) = self
-            .repository
-            .history(key, name, public, limit, offset, false)
-            .await?;
-        if public {
-            public_application(&application)?;
-        }
+        let catalog = self.published(key, public).await?;
         Ok(DistributionHistory {
-            application,
-            channel,
-            releases,
-            total,
+            total: catalog.releases.len() as i64,
+            application: catalog.application,
+            releases: catalog
+                .releases
+                .into_iter()
+                .skip(offset as usize)
+                .take(limit as usize)
+                .collect(),
         })
     }
-    /// Current pointer, release metadata and artifact lists share one read snapshot.
-    pub async fn manifest_history(
-        &self,
-        key: &str,
-        name: &str,
-        public: bool,
-        limit: u32,
-    ) -> Result<DistributionHistory> {
-        channel(name)?;
-        if !(1..=100).contains(&limit) {
-            return Err(ServiceError::Invalid);
+    pub async fn latest(&self, slug: &str, query: &ArtifactSelection) -> Result<PublicDownload> {
+        // latest is an installer shortcut; updater has its own signature-aware resolver.
+        if query.target.is_none() || query.purpose.as_deref().is_some_and(|p| p != "installer") {
+            return Err(ServiceError::InvalidArtifact);
         }
-        if public && !valid_slug(key) {
-            return Err(ServiceError::NotFound);
+        validate_selection(query)?;
+        let catalog = self.published(slug, true).await?;
+        for (release, artifacts) in catalog.releases {
+            if !release.version.pre.is_empty() {
+                continue;
+            }
+            match select_artifact(&artifacts, query) {
+                Ok(artifact) => {
+                    return self
+                        .authorize_download(
+                            PublicationSnapshot {
+                                application: catalog.application,
+                                release,
+                                artifacts,
+                            },
+                            artifact,
+                        )
+                        .await;
+                }
+                Err(ServiceError::NotFound) => continue,
+                Err(e) => return Err(e),
+            }
         }
-        let (application, channel, releases, total) = self
-            .repository
-            .history(key, name, public, limit, 0, true)
-            .await?;
-        if public {
-            public_application(&application)?;
-        }
-        Ok(DistributionHistory {
-            application,
-            channel,
-            releases,
-            total,
-        })
-    }
-    pub async fn default_selector(&self, app: &str) -> Result<Option<DistributionSelector>> {
-        self.repository.selector(app).await
-    }
-    pub async fn latest(
-        &self,
-        slug: &str,
-        name: &str,
-        query: &ArtifactSelection,
-    ) -> Result<PublicDownload> {
-        let (_, _, snapshot) = self.current(slug, name, true).await?;
-        let snapshot = snapshot.ok_or(ServiceError::NotFound)?;
-        let artifact = select_artifact(
-            &snapshot.artifacts,
-            query,
-            snapshot.default_distribution.as_ref(),
-        )?;
-        self.authorize_download(snapshot, artifact).await
+        Err(ServiceError::NotFound)
     }
     pub async fn version(
         &self,
         slug: &str,
         version: &str,
-        name: &str,
         query: &ArtifactSelection,
         id: Option<&str>,
     ) -> Result<PublicDownload> {
-        channel(name)?;
         if !valid_slug(slug) || crate::domain::release::version(version).is_none() {
             return Err(ServiceError::NotFound);
         }
-        let snapshot = self.repository.version(slug, version, name).await?;
+        let snapshot = self.repository.version(slug, version).await?;
         public_application(&snapshot.application)?;
         let artifact = if let Some(id) = id {
             snapshot
@@ -275,11 +208,7 @@ impl PublicDistribution {
                 .cloned()
                 .ok_or(ServiceError::NotFound)?
         } else {
-            select_artifact(
-                &snapshot.artifacts,
-                query,
-                snapshot.default_distribution.as_ref(),
-            )?
+            select_artifact(&snapshot.artifacts, query)?
         };
         self.authorize_download(snapshot, artifact).await
     }
@@ -300,11 +229,10 @@ impl PublicDistribution {
             application: snapshot.application,
             release: snapshot.release,
             artifact,
-            channel: snapshot.channel.name,
         })
     }
     pub async fn recheck(&self, app: &str) -> Result<()> {
-        if self.channels.public_active(app).await? {
+        if self.repository.public_active(app).await? {
             Ok(())
         } else {
             Err(ServiceError::NotFound)
@@ -336,34 +264,17 @@ impl PublicDistribution {
     pub fn internal_uri(&self, artifact: &Artifact) -> Result<String> {
         self.storage.internal_uri(&artifact.storage_key)
     }
-    pub fn artifact_path(
-        &self,
-        slug: &str,
-        release: &Release,
-        artifact: &Artifact,
-        channel: &str,
-    ) -> String {
-        let suffix = if channel == "beta" {
-            "?channel=beta"
-        } else {
-            ""
-        };
+    pub fn artifact_path(&self, slug: &str, release: &Release, artifact: &Artifact) -> String {
         format!(
-            "/{slug}/releases/{}/artifacts/{}/download{suffix}",
+            "/{slug}/releases/{}/artifacts/{}/download",
             release.version, artifact.id
         )
     }
-    pub fn artifact_url(
-        &self,
-        slug: &str,
-        release: &Release,
-        artifact: &Artifact,
-        channel: &str,
-    ) -> String {
+    pub fn artifact_url(&self, slug: &str, release: &Release, artifact: &Artifact) -> String {
         format!(
             "{}{}",
             self.config.public_base_url,
-            self.artifact_path(slug, release, artifact, channel)
+            self.artifact_path(slug, release, artifact)
         )
     }
 }

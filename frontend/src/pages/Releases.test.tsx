@@ -20,7 +20,7 @@ function mockFetch(role = 'admin') {
   vi.stubGlobal('fetch', fetch); return fetch;
 }
 it('validates SemVer, compound extensions and binary size units', () => {
-  for (const value of ['1.0.0', ' v1.2.0 ', '2.0.0-beta.1', '1.0.0+build.1']) expect(validVersion(value)).toBe(true);
+  for (const value of ['1.0.0', ' v1.2.0 ', '2.0.0-rc.1', '1.0.0+build.1']) expect(validVersion(value)).toBe(true);
   for (const value of ['1.0', '01.0.0', '1.0.0-01', '1.0.0+']) expect(validVersion(value)).toBe(false);
   expect(detectedType('installer.TAR.GZ')).toBe('tar.gz'); expect(detectedType('installer')).toBeUndefined();
   expect(size(1024)).toBe('1 KiB'); expect(size(2 * 1024 ** 3)).toBe('2 GiB');
@@ -101,7 +101,7 @@ it('refreshes artifacts and public links after appending to a published release'
   const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session
     : url.endsWith('/artifact-options') ? options : url.endsWith('/artifacts') ? (uploaded ? [artifact, added] : [artifact])
       : url.includes('/distribution/releases/') ? { public_available: true, warnings: [], files: uploaded ? [{ id: added.id, url: 'https://example.test/new-updater', tauri_compatible: true, signature_present: true }] : [] }
-        : url.endsWith(`/${release.id}`) ? { ...release, status: 'published', revision: uploaded ? 2 : 1, channels: ['stable'], published_at: 1 } : application)));
+        : url.endsWith(`/${release.id}`) ? { ...release, status: 'published', revision: uploaded ? 2 : 1, published_at: 1 } : application)));
   vi.stubGlobal('fetch', fetch); renderAt(route);
   fireEvent.click(await screen.findByRole('button', { name: 'Добавить артефакт' }));
   const dialog = await screen.findByRole('dialog', { name: 'Загрузка дистрибутива' });

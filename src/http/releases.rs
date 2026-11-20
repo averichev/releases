@@ -41,7 +41,6 @@ pub(super) struct ReleaseDto {
     created_at: i64,
     updated_at: i64,
     published_at: Option<i64>,
-    channels: Vec<String>,
     artifact_count: i64,
     total_size_bytes: i64,
 }
@@ -58,7 +57,6 @@ impl From<Release> for ReleaseDto {
             created_at: r.created_at,
             updated_at: r.updated_at,
             published_at: r.published_at,
-            channels: r.channels,
             artifact_count: r.artifact_count,
             total_size_bytes: r.total_size_bytes,
         }

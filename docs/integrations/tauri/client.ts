@@ -17,7 +17,7 @@ export async function checkForUpdates(
     report('Проверяем обновления…');
     update = await check({ timeout: 30_000 });
     if (!update) {
-      report('Для этого канала и платформы обновлений нет.');
+      report('Для этой платформы обновлений нет.');
       return;
     }
     report(`Доступна версия ${update.version} (установлена ${update.currentVersion}).`);

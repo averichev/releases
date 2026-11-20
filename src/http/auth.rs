@@ -294,7 +294,6 @@ impl From<ServiceError> for ApiError {
             ServiceError::InvalidArtifact => Self::InvalidArtifact,
             ServiceError::ArtifactConflict => Self::ArtifactConflict,
             ServiceError::UpdaterSignatureRequired => Self::UpdaterSignatureRequired,
-            ServiceError::DefaultInstallerRequired => Self::DefaultInstallerRequired,
             ServiceError::PayloadTooLarge => Self::PayloadTooLarge,
             ServiceError::UploadTimeout => Self::UploadTimeout,
             ServiceError::StorageFull => Self::StorageFull,

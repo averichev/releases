@@ -88,7 +88,6 @@ impl ReleaseManagement {
             created_at: now,
             updated_at: now,
             published_at: None,
-            channels: Vec::new(),
             artifact_count: 0,
             total_size_bytes: 0,
         };

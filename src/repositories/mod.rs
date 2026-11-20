@@ -8,8 +8,6 @@ pub mod users;
 pub mod artifact;
 pub mod release;
 
-pub mod channel;
-
 pub mod publication_history;
 
 pub mod distribution;

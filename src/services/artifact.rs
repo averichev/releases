@@ -12,10 +12,9 @@ use crate::{
     },
     repositories::{
         applications::ApplicationsRepository, artifact::ArtifactsRepository,
-        distribution::DistributionRepository, release::ReleasesRepository,
+        release::ReleasesRepository,
     },
     services::{
-        distribution::check_installer_addition,
         error::{Result, ServiceError},
         release::{authorize, draft, remove_after_commit},
         sessions::Identity,
@@ -159,11 +158,6 @@ impl ArtifactManagement {
                 if artifact.updater_signature.is_none() {
                     return Err(ServiceError::UpdaterSignatureRequired);
                 }
-            }
-            if artifact.distribution_role == "installer" {
-                let selector = DistributionRepository::selector_in(&mut tx, &upload.app).await?;
-                let artifacts = ArtifactsRepository::list_in(&mut tx, &upload.release).await?;
-                check_installer_addition(&artifacts, &artifact, selector.as_ref())?;
             }
         }
         ArtifactsRepository::insert(&mut tx, &artifact).await?;

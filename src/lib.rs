@@ -55,11 +55,9 @@ pub async fn application_state(
     let sessions = repositories::sessions::SessionsRepository::new(database.clone());
     let storage = LocalArtifactStorage::new(&config.storage);
     let releases = repositories::release::ReleasesRepository::new(database.clone());
-    let channels = repositories::channel::ChannelsRepository::new(database.clone());
     let validator = services::publication_validation::PublicationValidator::new(storage.clone());
     let distribution = services::distribution::PublicDistribution::new(
         repositories::distribution::DistributionRepository::new(database.clone()),
-        channels.clone(),
         storage.clone(),
         config.download.clone(),
     );
@@ -71,8 +69,8 @@ pub async fn application_state(
             validator.clone(),
         ),
         publishing: services::publishing::ReleasePublishing::new(
-            channels.clone(),
             releases.clone(),
+            repositories::distribution::DistributionRepository::new(database.clone()),
             validator.clone(),
             repositories::publication_history::PublicationHistoryRepository::new(database.clone()),
         ),

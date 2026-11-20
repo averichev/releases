@@ -144,27 +144,6 @@ impl ApplicationCatalog {
         tx.commit().await?;
         Ok(app)
     }
-    pub async fn set_distribution(
-        &self,
-        actor: &Identity,
-        id: &str,
-        selector: Option<application::DistributionSelector>,
-    ) -> Result<()> {
-        if selector.as_ref().is_some_and(|s| !s.valid()) {
-            return Err(ServiceError::InvalidArtifact);
-        }
-        let mut tx = self.repository.write().await?;
-        Self::authorize(&mut tx, actor).await?;
-        ApplicationsRepository::get_in(&mut tx, id).await?;
-        crate::repositories::distribution::DistributionRepository::set_selector(
-            &mut tx,
-            id,
-            selector.as_ref(),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(())
-    }
     pub async fn set_tauri_key(&self, actor: &Identity, id: &str, key: Option<&str>) -> Result<()> {
         let key = key
             .map(|v| crate::domain::tauri::public_key(v).ok_or(ServiceError::InvalidUpdater))

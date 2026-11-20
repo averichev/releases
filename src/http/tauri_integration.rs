@@ -25,9 +25,7 @@ pub fn router() -> Router<AppState> {
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct SettingsQuery {
-    channel: Option<String>,
-}
+struct SettingsQuery {}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SettingsRequest {
@@ -40,15 +38,12 @@ async fn details(
     full: bool,
 ) -> Result<Json<Value>, ApiError> {
     let [app] = ids(path)?;
-    let Query(q) = query.map_err(|_| ApiError::BadRequest)?;
-    let d = state
-        .tauri_integration
-        .details(&app, q.channel.as_deref().unwrap_or("stable"), full)
-        .await?;
+    let Query(_q) = query.map_err(|_| ApiError::BadRequest)?;
+    let d = state.tauri_integration.details(&app, full).await?;
     Ok(Json(
-        json!({"public_key":d.public_key,"public_base_url":d.public_base_url,"endpoint":d.endpoint,"configuration":d.configuration,"endpoints":{"stable":d.endpoints[0],"beta":d.endpoints[1]},
-        "channel":d.channel,"current_version":d.current_version,"published_release_exists":d.published_release_exists,
-        "packages":d.packages.into_iter().map(|p| json!({"id":p.id,"filename":p.filename,"target":p.target,"compatible":p.compatible,"signature_present":p.signature_present})).collect::<Vec<_>>(),
+        json!({"public_key":d.public_key,"public_base_url":d.public_base_url,"endpoint":d.endpoint,"configuration":d.configuration,
+        "published_release_exists":d.published_release_exists,
+        "packages":d.packages.into_iter().map(|p| json!({"id":p.id,"version":p.version,"filename":p.filename,"target":p.target,"compatible":p.compatible,"signature_present":p.signature_present})).collect::<Vec<_>>(),
         "ready":d.blockers.is_empty(),"blockers":d.blockers.into_iter().map(|i| json!({"code":i.code,"artifact_id":i.artifact_id,"message":i.message})).collect::<Vec<_>>(),
         "validation":d.validation.as_ref().map(super::publication::validation_dto),"full_integrity_checked":full && d.validation.is_some()}),
     ))

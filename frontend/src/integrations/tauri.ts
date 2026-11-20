@@ -19,24 +19,3 @@ export const register = `// В существующем .setup(|app| { ... }) д
 // Если setup ещё нет, добавьте .setup(|app| { ...; Ok(()) })
 // в цепочку tauri::Builder::default() перед .run(...).`;
 export const capabilities = JSON.stringify({ permissions: ['updater:default', 'process:allow-restart'] }, null, 2);
-export function runtime(endpoints: {stable: string; beta: string}) {
-  return `use tauri_plugin_updater::UpdaterExt;
-
-// Вызывайте из Rust, передав выбор пользователя из настроек клиента.
-#[cfg(desktop)]
-async fn check_channel(
-    app: tauri::AppHandle,
-    beta: bool,
-) -> tauri_plugin_updater::Result<Option<tauri_plugin_updater::Update>> {
-    let endpoint = if beta {
-        ${JSON.stringify(endpoints.beta)}
-    } else {
-        ${JSON.stringify(endpoints.stable)}
-    };
-    app.updater_builder()
-        .endpoints(vec![endpoint.parse()?])?
-        .build()?
-        .check()
-        .await
-}`;
-}

@@ -7,7 +7,7 @@ use veruna_releases::{
     application_state,
     config::AppConfig,
     domain::{
-        application::{ApplicationChanges, NewApplication, Status, Visibility},
+        application::{NewApplication, Status, Visibility},
         artifact::{Artifact, UploadMetadata},
         release::{Release, ReleaseChanges, ReleaseInput, ReleaseStatus},
         user::Role,
@@ -126,25 +126,21 @@ impl TestApp {
             .await
             .unwrap()
     }
-    async fn command(&self, r: &Release, channel: &str) -> PublicationCommand {
-        let current = self.state.releases.get(&self.app, &r.id).await.unwrap();
-        let channels = self.state.publishing.channels(&self.app).await.unwrap();
-        let channel = channels.into_iter().find(|c| c.name == channel).unwrap();
+    async fn command(&self, r: &Release) -> PublicationCommand {
         PublicationCommand {
-            channel: channel.name,
-            expected_channel_revision: channel.revision,
-            expected_release_revision: current.revision,
+            expected_release_revision: self
+                .state
+                .releases
+                .get(&self.app, &r.id)
+                .await
+                .unwrap()
+                .revision,
         }
     }
-    async fn publish(&self, r: &Release, channel: &str) {
+    async fn publish(&self, r: &Release) {
         self.state
             .publishing
-            .publish(
-                &self.actor,
-                &self.app,
-                &r.id,
-                self.command(r, channel).await,
-            )
+            .publish(&self.actor, &self.app, &r.id, self.command(r).await)
             .await
             .unwrap();
     }
@@ -211,7 +207,7 @@ fn signature() -> String {
     STANDARD.encode(format!("untrusted comment: signature from minisign secret key\n{}\ntrusted comment: timestamp:1\n{}\n",STANDARD.encode(packet),STANDARD.encode([0u8;64])))
 }
 fn command_json(c: PublicationCommand) -> Value {
-    json!({"channel":c.channel,"expected_channel_revision":c.expected_channel_revision,"expected_release_revision":c.expected_release_revision})
+    json!({"expected_release_revision":c.expected_release_revision})
 }
 #[tokio::test]
 async fn publication_checks_lifecycle_http_and_sql_immutability_and_idempotency() {
@@ -222,19 +218,18 @@ async fn publication_checks_lifecycle_http_and_sql_immutability_and_idempotency(
         .call(
             "POST",
             &format!("{}/validate-publication", t.release_path(&r)),
-            json!({"channel":"stable"}),
+            json!({}),
             200,
         )
         .await;
     assert_eq!(check["validation"]["state"], "ready");
-    assert_eq!(check["channel"]["current_version"], Value::Null);
-    let command = command_json(t.command(&r, "stable").await);
+    let command = command_json(t.command(&r).await);
     let path = format!("{}/publish", t.release_path(&r));
     let first = t.call("POST", &path, command.clone(), 200).await;
     let published = t.state.releases.get(&t.app, &r.id).await.unwrap();
     assert_eq!(published.status, ReleaseStatus::Published);
     assert!(published.published_at.is_some());
-    assert_eq!(published.channels, vec!["stable"]);
+
     assert_eq!(t.call("POST", &path, command, 200).await, first);
     assert_eq!(
         t.state
@@ -298,8 +293,7 @@ async fn publication_checks_lifecycle_http_and_sql_immutability_and_idempotency(
         "UPDATE artifacts SET sha256=replace(sha256,'a','b')",
         "UPDATE artifacts SET updater_signature=NULL",
         "DELETE FROM publication_history",
-        "UPDATE publication_history SET action='channel_promoted'",
-        "DELETE FROM channel_releases",
+        "UPDATE publication_history SET created_at=created_at+1",
     ] {
         assert!(
             sqlx::query(sql).execute(&t.state.database).await.is_err(),
@@ -310,7 +304,7 @@ async fn publication_checks_lifecycle_http_and_sql_immutability_and_idempotency(
         .call(
             "POST",
             &format!("{}/validate-publication", t.release_path(&r)),
-            json!({"channel":"stable"}),
+            json!({}),
             200,
         )
         .await;
@@ -326,14 +320,14 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
     let validation = t
         .state
         .publishing
-        .validate(&t.actor, &t.app, &r.id, "stable")
+        .validate(&t.actor, &t.app, &r.id)
         .await
         .unwrap();
     assert_eq!(validation.validation.errors[0].code, "no_artifacts");
     t.call(
         "POST",
         &format!("{}/publish", t.release_path(&r)),
-        command_json(t.command(&r, "stable").await),
+        command_json(t.command(&r).await),
         422,
     )
     .await;
@@ -342,7 +336,7 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
     let validation = t
         .state
         .publishing
-        .validate(&t.actor, &t.app, &r.id, "stable")
+        .validate(&t.actor, &t.app, &r.id)
         .await
         .unwrap();
     assert_eq!(validation.validation.errors[0].code, "checksum_mismatch");
@@ -350,7 +344,7 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
         .call(
             "POST",
             &format!("{}/publish", t.release_path(&r)),
-            command_json(t.command(&r, "stable").await),
+            command_json(t.command(&r).await),
             422,
         )
         .await;
@@ -359,7 +353,7 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
     let validation = t
         .state
         .publishing
-        .validate(&t.actor, &t.app, &r.id, "stable")
+        .validate(&t.actor, &t.app, &r.id)
         .await
         .unwrap();
     assert_eq!(validation.validation.errors[0].code, "file_unavailable");
@@ -369,7 +363,7 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
     assert_eq!(
         t.state
             .publishing
-            .validate(&t.actor, &t.app, &r.id, "stable")
+            .validate(&t.actor, &t.app, &r.id)
             .await
             .unwrap()
             .validation
@@ -386,7 +380,7 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
     assert_eq!(
         t.state
             .publishing
-            .validate(&t.actor, &t.app, &r.id, "stable")
+            .validate(&t.actor, &t.app, &r.id)
             .await
             .unwrap()
             .validation
@@ -397,7 +391,7 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
     assert!(matches!(
         t.state
             .publishing
-            .publish(&t.actor, &t.app, &r.id, t.command(&r, "stable").await)
+            .publish(&t.actor, &t.app, &r.id, t.command(&r).await)
             .await,
         Err(ServiceError::PublicationBlocked(_))
     ));
@@ -414,126 +408,9 @@ async fn validation_explains_missing_corrupt_and_archived_releases_without_state
             .is_empty()
     );
 }
+
 #[tokio::test]
-async fn channels_support_beta_promotion_multiple_memberships_rollback_history_and_semver() {
-    let t = TestApp::new().await;
-    let channels = t
-        .call("GET", &format!("{}/channels", t.base()), Value::Null, 200)
-        .await;
-    assert_eq!(channels.as_array().unwrap().len(), 2);
-    assert!(
-        channels
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|c| c["current_release_id"].is_null())
-    );
-    let preview = t.create("2.0.0-rc.1").await;
-    t.upload(&preview, "any", "preview.zip").await;
-    t.publish(&preview, "beta").await;
-    assert!(matches!(
-        t.state
-            .publishing
-            .publish(
-                &t.actor,
-                &t.app,
-                &preview.id,
-                t.command(&preview, "stable").await
-            )
-            .await,
-        Err(ServiceError::PublicationBlocked(_))
-    ));
-    let older = t.create("1.9.0").await;
-    t.upload(&older, "any", "old.zip").await;
-    t.publish(&older, "beta").await;
-    let date = t
-        .state
-        .releases
-        .get(&t.app, &older.id)
-        .await
-        .unwrap()
-        .published_at;
-    t.publish(&older, "stable").await;
-    let newer = t.create("1.10.0+build.9").await;
-    t.upload(&newer, "any", "new.zip").await;
-    t.publish(&newer, "stable").await;
-    let c = t.command(&older, "stable").await;
-    t.call("PUT",&format!("{}/channels/stable/current",t.base()),json!({"release_id":older.id,"expected_channel_revision":c.expected_channel_revision,"expected_release_revision":c.expected_release_revision}),200).await;
-    let channels = t.state.publishing.channels(&t.app).await.unwrap();
-    let stable = channels.iter().find(|c| c.name == "stable").unwrap();
-    assert_eq!(stable.current_version.as_deref(), Some("1.9.0"));
-    assert_eq!(stable.release_count, 2);
-    assert_eq!(
-        t.state
-            .releases
-            .get(&t.app, &older.id)
-            .await
-            .unwrap()
-            .published_at,
-        date
-    );
-    assert_eq!(
-        t.state
-            .artifacts
-            .list(&t.app, &older.id)
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
-    let events = t.state.publishing.history(&t.app, 50, None).await.unwrap();
-    assert_eq!(events.len(), 5);
-    assert_eq!(events[0].action, "channel_rolled_back");
-    assert_eq!(
-        events[0].previous_version.as_deref(),
-        Some("1.10.0+build.9")
-    );
-    assert_eq!(events[0].new_version, "1.9.0");
-    assert_eq!(events[2].action, "channel_promoted");
-    let paged = t
-        .state
-        .publishing
-        .history(&t.app, 2, Some(events[1].id))
-        .await
-        .unwrap();
-    assert_eq!(paged[0].id, events[2].id);
-    let draft = t.create("3.0.0").await;
-    assert!(matches!(
-        t.state
-            .publishing
-            .switch(
-                &t.actor,
-                &t.app,
-                &draft.id,
-                t.command(&draft, "stable").await
-            )
-            .await,
-        Err(ServiceError::ReleaseLocked)
-    ));
-    // Corruption after publication cannot be used as a rollback destination.
-    let a = t
-        .state
-        .artifacts
-        .list(&t.app, &newer.id)
-        .await
-        .unwrap()
-        .remove(0);
-    t.corrupt(&a, b"damaged").await;
-    assert!(matches!(
-        t.state
-            .publishing
-            .switch(
-                &t.actor,
-                &t.app,
-                &newer.id,
-                t.command(&newer, "stable").await
-            )
-            .await,
-        Err(ServiceError::PublicationBlocked(_))
-    ));
-}
-#[tokio::test]
-async fn channel_ownership_and_optimistic_revisions_reject_stale_and_parallel_commands() {
+async fn publication_ownership_and_optimistic_revisions_reject_stale_and_parallel_commands() {
     let t = TestApp::new().await;
     let a = t.create("1.0.0").await;
     t.upload(&a, "any", "one.zip").await;
@@ -556,17 +433,13 @@ async fn channel_ownership_and_optimistic_revisions_reject_stale_and_parallel_co
         .await
         .unwrap();
     let second = t.state.sessions.authenticate(&login.token).await.unwrap();
-    let ca = t.command(&a, "stable").await;
-    let cb = t.command(&b, "stable").await;
+    let ca = t.command(&a).await;
+    let cb = t.command(&b).await;
     let (one, two) = tokio::join!(
         t.state.publishing.publish(&t.actor, &t.app, &a.id, ca),
         t.state.publishing.publish(&second, &t.app, &b.id, cb)
     );
-    assert!(matches!(
-        (&one, &two),
-        (Ok(_), Err(ServiceError::PublicationConflict))
-            | (Err(ServiceError::PublicationConflict), Ok(_))
-    ));
+    assert!(one.is_ok() && two.is_ok());
     assert_eq!(
         t.state
             .publishing
@@ -574,10 +447,11 @@ async fn channel_ownership_and_optimistic_revisions_reject_stale_and_parallel_co
             .await
             .unwrap()
             .len(),
-        1
+        2
     );
-    let draft = if one.is_err() { &a } else { &b };
-    let stale = t.command(draft, "stable").await;
+    let draft = t.create("3.0.0").await;
+    t.upload(&draft, "any", "three.zip").await;
+    let stale = t.command(&draft).await;
     t.state
         .releases
         .update(
@@ -620,194 +494,14 @@ async fn channel_ownership_and_optimistic_revisions_reject_stale_and_parallel_co
                 &foreign.id,
                 &a.id,
                 PublicationCommand {
-                    channel: "stable".into(),
-                    expected_channel_revision: 0,
                     expected_release_revision: 1
                 }
             )
             .await,
         Err(ServiceError::NotFound)
     ));
-    let channel = t
-        .state
-        .publishing
-        .channels(&foreign.id)
-        .await
-        .unwrap()
-        .remove(0);
-    assert!(sqlx::query("INSERT INTO channel_releases(channel_id,release_id,application_id,added_at) VALUES(?,?,?,1)").bind(&channel.id).bind(&a.id).bind(&foreign.id).execute(&t.state.database).await.is_err());
-    assert!(
-        sqlx::query("UPDATE release_channels SET current_release_id=? WHERE id=?")
-            .bind(&a.id)
-            .bind(&channel.id)
-            .execute(&t.state.database)
-            .await
-            .is_err()
-    );
 }
-#[tokio::test]
-async fn public_manifest_honors_current_pointer_history_limits_etag_and_privacy() {
-    let t = TestApp::new().await;
-    t.call("GET", "/product/manifest.json", Value::Null, 404)
-        .await;
-    let r = t.create("1.9.0+ci.1").await;
-    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
-    let newer = t.create("1.10.0").await;
-    t.upload(&newer, "linux-x86_64", "package.deb").await;
-    t.publish(&newer, "stable").await;
-    let beta = t.create("2.0.0-beta.1").await;
-    t.upload(&beta, "any", "preview.zip").await;
-    t.publish(&beta, "beta").await;
-    t.create("99.0.0").await;
-    t.state
-        .publishing
-        .switch(&t.actor, &t.app, &r.id, t.command(&r, "stable").await)
-        .await
-        .unwrap();
-    let mut manifest = t
-        .call("GET", "/product/manifest.json", Value::Null, 200)
-        .await;
-    assert_eq!(manifest["schema_version"], 1);
-    assert_eq!(manifest["app"], "product");
-    assert_eq!(manifest["latest"], "1.9.0+ci.1");
-    assert_eq!(manifest["releases"].as_array().unwrap().len(), 2);
-    assert_eq!(manifest["releases"][0]["version"], manifest["latest"]);
-    let metadata = &manifest["releases"][0]["artifacts"][0];
-    assert_eq!(metadata["id"], a.id);
-    assert!(
-        metadata["download_url"]
-            .as_str()
-            .unwrap()
-            .contains("/artifacts/")
-    );
-    assert!(metadata.get("storage_key").is_none());
-    let date = manifest["releases"][0]["published_at"].as_str().unwrap();
-    assert!(date.ends_with('Z'));
-    assert!(chrono::DateTime::parse_from_rfc3339(date).is_ok());
-    assert_eq!(
-        t.call("GET", "/product/manifest.json?limit=1", Value::Null, 200)
-            .await["releases"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        t.call(
-            "GET",
-            "/product/manifest.json?channel=beta",
-            Value::Null,
-            200
-        )
-        .await["latest"],
-        "2.0.0-beta.1"
-    );
-    let response = t
-        .request("GET", "/product/manifest.json", Body::empty(), None, false)
-        .await;
-    assert_eq!(response.status(), 200);
-    assert_eq!(response.headers()["content-type"], "application/json");
-    let etag = response.headers()["etag"].clone();
-    let conditional = || {
-        Request::builder()
-            .uri("/product/manifest.json")
-            .header("if-none-match", &etag)
-            .body(Body::empty())
-            .unwrap()
-    };
-    let response = t.router.clone().oneshot(conditional()).await.unwrap();
-    assert_eq!(response.status(), 304);
-    assert!(
-        response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes()
-            .is_empty()
-    );
-    t.state
-        .applications
-        .update(
-            &t.actor,
-            &t.app,
-            ApplicationChanges {
-                visibility: Some(Visibility::Private),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        t.router
-            .clone()
-            .oneshot(conditional())
-            .await
-            .unwrap()
-            .status(),
-        404
-    );
-    // Private previews omit public download links while preserving release metadata.
-    for release in manifest["releases"].as_array_mut().unwrap() {
-        for artifact in release["artifacts"].as_array_mut().unwrap() {
-            artifact.as_object_mut().unwrap().remove("download_url");
-        }
-    }
-    assert_eq!(
-        t.call(
-            "GET",
-            &format!("{}/manifests/stable/preview", t.base()),
-            Value::Null,
-            200
-        )
-        .await,
-        manifest
-    );
-    t.state
-        .applications
-        .set_status(&t.actor, &t.app, Status::Archived)
-        .await
-        .unwrap();
-    assert_eq!(
-        t.router
-            .clone()
-            .oneshot(conditional())
-            .await
-            .unwrap()
-            .status(),
-        404
-    );
-    t.call("GET", "/product/manifest.json?limit=101", Value::Null, 400)
-        .await;
-    t.call(
-        "GET",
-        "/product/manifest.json?unknown=yes",
-        Value::Null,
-        400,
-    )
-    .await;
-    t.state
-        .applications
-        .set_status(&t.actor, &t.app, Status::Active)
-        .await
-        .unwrap();
-    t.state
-        .applications
-        .update(
-            &t.actor,
-            &t.app,
-            ApplicationChanges {
-                visibility: Some(Visibility::Public),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    t.corrupt(&a, b"truncated").await;
-    t.call("GET", "/product/manifest.json", Value::Null, 503)
-        .await;
-}
+
 #[tokio::test]
 async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
     let t = TestApp::new().await;
@@ -833,7 +527,7 @@ async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
     let check = t
         .state
         .publishing
-        .validate(&t.actor, &t.app, &r.id, "stable")
+        .validate(&t.actor, &t.app, &r.id)
         .await
         .unwrap();
     assert!(check.validation.errors.is_empty());
@@ -882,7 +576,7 @@ async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
             .status(),
         200
     );
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     assert_eq!(
         t.request("PUT", &url, Body::from(sig), Some(&t.token), true)
             .await
@@ -895,7 +589,7 @@ async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
         .call(
             "POST",
             &preview_path,
-            json!({"channel":"stable","target":"windows-x86_64","current_version":"1.0.0"}),
+            json!({"target":"windows-x86_64","current_version":"1.0.0"}),
             200,
         )
         .await;
@@ -908,7 +602,7 @@ async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
             t.call(
                 "POST",
                 &preview_path,
-                json!({"channel":"stable","target":"windows-x86_64","current_version":version}),
+                json!({"target":"windows-x86_64","current_version":version}),
                 200
             )
             .await["reason"],
@@ -919,7 +613,7 @@ async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
         t.call(
             "POST",
             &preview_path,
-            json!({"channel":"stable","target":"darwin-aarch64","current_version":"1.0.0"}),
+            json!({"target":"darwin-aarch64","current_version":"1.0.0"}),
             200
         )
         .await["reason"],
@@ -928,7 +622,7 @@ async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
     t.call(
         "POST",
         &preview_path,
-        json!({"channel":"stable","target":"windows-x86_64","current_version":"garbage"}),
+        json!({"target":"windows-x86_64","current_version":"garbage"}),
         422,
     )
     .await;
@@ -939,7 +633,7 @@ async fn updater_roles_signature_lifecycle_and_public_diagnostics() {
         t.call(
             "POST",
             &preview_path,
-            json!({"channel":"stable","target":"windows-x86_64","current_version":"1.0.0"}),
+            json!({"target":"windows-x86_64","current_version":"1.0.0"}),
             200
         )
         .await["reason"],
@@ -952,7 +646,7 @@ async fn tauri_protocol_compares_semver_maps_targets_and_requires_explicit_signe
     let t = TestApp::new().await;
     let r = t.create("1.2.0+ci.1").await;
     let mut a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let r = t.state.releases.get(&t.app, &r.id).await.unwrap();
     assert!(matches!(
         updater::select(r.clone(), vec![a.clone()], "windows-x64", "1.0.0").unwrap(),
@@ -1127,7 +821,6 @@ async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {
         .unwrap()
         .token;
     for (method, path, readable) in [
-        ("GET", format!("{}/channels", t.base()), true),
         ("GET", format!("{}/publication-history", t.base()), true),
         (
             "POST",
@@ -1135,16 +828,7 @@ async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {
             false,
         ),
         ("POST", format!("{}/publish", t.release_path(&r)), false),
-        (
-            "PUT",
-            format!("{}/channels/stable/current", t.base()),
-            false,
-        ),
-        (
-            "GET",
-            format!("{}/manifests/stable/preview", t.base()),
-            false,
-        ),
+        ("GET", format!("{}/manifests/preview", t.base()), false),
         ("POST", format!("{}/updater/tauri/preview", t.base()), true),
         ("PUT", format!("{}/updater", t.artifact_path(&r, &a)), false),
         (
@@ -1170,7 +854,7 @@ async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {
                 method,
                 &path,
                 Body::from(if path.ends_with("/updater/tauri/preview") {
-                    r#"{"channel":"stable","target":"windows-x86_64","current_version":"1.0.0"}"#
+                    r#"{"target":"windows-x86_64","current_version":"1.0.0"}"#
                 } else {
                     "{}"
                 }),
@@ -1200,8 +884,6 @@ async fn new_admin_endpoints_enforce_sessions_roles_csrf_and_revocation() {
                 &t.app,
                 &r.id,
                 PublicationCommand {
-                    channel: "stable".into(),
-                    expected_channel_revision: 0,
                     expected_release_revision: 1
                 }
             )
@@ -1245,20 +927,17 @@ async fn updater_conflict_and_inflight_installer_recheck_published_selection() {
         .await
         .unwrap();
     pending.write(b"pending").await.unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     // Publication while bytes are in flight must activate published append rules.
-    assert!(matches!(
-        t.state.artifacts.complete(&t.actor, pending).await,
-        Err(ServiceError::DefaultInstallerRequired)
-    ));
+    t.state.artifacts.complete(&t.actor, pending).await.unwrap();
     assert_eq!(
         t.state.artifacts.list(&t.app, &r.id).await.unwrap().len(),
-        2
+        3
     );
     assert_eq!(
         t.state
             .updater
-            .preview(&t.app, "stable", "windows-x86_64", "0.0.0")
+            .preview(&t.app, "windows-x86_64", "0.0.0")
             .await
             .unwrap()
             .reason,
@@ -1267,7 +946,7 @@ async fn updater_conflict_and_inflight_installer_recheck_published_selection() {
 }
 
 #[tokio::test]
-async fn history_failure_rolls_back_publication_membership_and_current_pointer() {
+async fn history_failure_rolls_back_publication() {
     let t = TestApp::new().await;
     let r = t.create("1.0.0").await;
     t.upload(&r, "any", "package.zip").await;
@@ -1275,19 +954,13 @@ async fn history_failure_rolls_back_publication_membership_and_current_pointer()
     assert!(
         t.state
             .publishing
-            .publish(&t.actor, &t.app, &r.id, t.command(&r, "stable").await)
+            .publish(&t.actor, &t.app, &r.id, t.command(&r).await)
             .await
             .is_err()
     );
     assert_eq!(
         t.state.releases.get(&t.app, &r.id).await.unwrap().status,
         ReleaseStatus::Draft
-    );
-    let channels = t.state.publishing.channels(&t.app).await.unwrap();
-    assert!(
-        channels
-            .iter()
-            .all(|c| c.current_release_id.is_none() && c.release_count == 0 && c.revision == 0)
     );
     assert!(
         t.state
@@ -1301,7 +974,7 @@ async fn history_failure_rolls_back_publication_membership_and_current_pointer()
         .execute(&t.state.database)
         .await
         .unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
 }
 
 impl TestApp {
@@ -1399,7 +1072,7 @@ async fn draft_upload_roles_conflicts_and_signature_are_atomic() {
     let check = t
         .state
         .publishing
-        .validate(&t.actor, &t.app, &r.id, "stable")
+        .validate(&t.actor, &t.app, &r.id)
         .await
         .unwrap();
     assert!(check.validation.errors.is_empty());
@@ -1433,7 +1106,7 @@ async fn draft_upload_roles_conflicts_and_signature_are_atomic() {
     )
     .await;
     assert_eq!(darwin["signature_present"], true);
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     t.call(
         "POST",
         &format!("{}/releases", t.base()),
@@ -1444,15 +1117,11 @@ async fn draft_upload_roles_conflicts_and_signature_are_atomic() {
 }
 #[tokio::test]
 async fn published_append_updates_manifest_etag_downloads_and_tauri_without_changing_publication() {
-    use veruna_releases::domain::application::DistributionSelector;
     let t = TestApp::new().await;
     let r = t.create("0.5.0").await;
     let installer = t.upload(&r, "windows-x86_64", "installer.exe").await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
-    let channels = t
-        .call("GET", &format!("{}/channels", t.base()), Value::Null, 200)
-        .await;
     let history = t
         .call(
             "GET",
@@ -1507,30 +1176,6 @@ async fn published_append_updates_manifest_etag_downloads_and_tauri_without_chan
     assert_eq!(after_updater.revision, before.revision + 1);
     assert_eq!(after_updater.published_at, before.published_at);
     assert_eq!(after_updater.updated_at, before.updated_at);
-    let error = response_json(
-        t.upload_form(&r, "linux-x86_64", "installer.deb", Some("installer"), None)
-            .await,
-        409,
-    )
-    .await;
-    assert_eq!(error["error"]["code"], "default_installer_required");
-    assert_eq!(
-        t.state.releases.get(&t.app, &r.id).await.unwrap(),
-        after_updater
-    );
-    t.state
-        .applications
-        .set_distribution(
-            &t.actor,
-            &t.app,
-            Some(DistributionSelector {
-                target: "windows-x86_64".into(),
-                format: "exe".into(),
-                purpose: "installer".into(),
-            }),
-        )
-        .await
-        .unwrap();
     let linux = response_json(
         t.upload_form(&r, "linux-x86_64", "installer.deb", Some("installer"), None)
             .await,
@@ -1542,12 +1187,7 @@ async fn published_append_updates_manifest_etag_downloads_and_tauri_without_chan
     assert_eq!(after.published_at, before.published_at);
     assert_eq!(after.updated_at, before.updated_at);
     assert_eq!(after.revision, before.revision + 2);
-    assert_eq!(after.channels, before.channels);
-    assert_eq!(
-        t.call("GET", &format!("{}/channels", t.base()), Value::Null, 200)
-            .await,
-        channels
-    );
+
     assert_eq!(
         t.call(
             "GET",
@@ -1601,24 +1241,22 @@ async fn published_append_updates_manifest_etag_downloads_and_tauri_without_chan
             );
         }
     }
-    for (query, id) in [
-        ("", installer.id.as_str()),
-        ("?target=windows-x86_64&format=exe", installer.id.as_str()),
+    for (path, id) in [
+        ("/product/latest/windows-x86_64", installer.id.as_str()),
         (
-            "?purpose=updater&target=windows-x86_64&format=exe",
+            "/product/latest/windows-x86_64?format=exe",
+            installer.id.as_str(),
+        ),
+        (
+            "/product/0.5.0/windows-x86_64?purpose=updater&format=exe",
             updater_id,
         ),
-        ("?target=linux-x86_64", linux["id"].as_str().unwrap()),
+        (
+            "/product/latest/linux-x86_64",
+            linux["id"].as_str().unwrap(),
+        ),
     ] {
-        let response = t
-            .request(
-                "GET",
-                &format!("/product/latest{query}"),
-                Body::empty(),
-                None,
-                false,
-            )
-            .await;
+        let response = t.request("GET", path, Body::empty(), None, false).await;
         assert_eq!(response.status(), 307);
         assert!(
             response.headers()["location"]
@@ -1631,7 +1269,7 @@ async fn published_append_updates_manifest_etag_downloads_and_tauri_without_chan
     let update = t
         .call(
             "GET",
-            "/api/v1/updates/tauri/product/stable/windows/x86_64/0.4.0",
+            "/api/v1/updates/tauri/product/windows/x86_64/0.4.0",
             Value::Null,
             200,
         )
@@ -1645,7 +1283,7 @@ async fn published_artifacts_cannot_be_replaced_even_with_sql_replace() {
     let t = TestApp::new().await;
     let r = t.create("0.5.0").await;
     let a = t.upload(&r, "windows-x86_64", "installer.exe").await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let before = t.state.artifacts.list(&t.app, &r.id).await.unwrap();
     for column in [
         "filename='renamed.exe'",
@@ -1727,7 +1365,7 @@ async fn append_races_serialize_conflicts_and_publication_rules() {
         .await
         .unwrap();
     unsigned.write(b"unsigned").await.unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     assert!(matches!(
         t.state.artifacts.complete(&t.actor, unsigned).await,
         Err(ServiceError::UpdaterSignatureRequired)
@@ -1776,7 +1414,6 @@ async fn append_races_serialize_conflicts_and_publication_rules() {
 
 #[tokio::test]
 async fn published_installer_addition_preserves_filtered_latest_and_can_follow_updater() {
-    use veruna_releases::domain::application::DistributionSelector;
     let t = TestApp::new().await;
     let r = t.create("0.5.0").await;
     response_json(
@@ -1791,7 +1428,7 @@ async fn published_installer_addition_preserves_filtered_latest_and_can_follow_u
         201,
     )
     .await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     // A published release initially containing only an updater can gain an installer.
     response_json(
         t.upload_form(
@@ -1805,38 +1442,18 @@ async fn published_installer_addition_preserves_filtered_latest_and_can_follow_u
         201,
     )
     .await;
-    t.state
-        .applications
-        .set_distribution(
-            &t.actor,
-            &t.app,
-            Some(DistributionSelector {
-                target: "windows-x86_64".into(),
-                format: "exe".into(),
-                purpose: "installer".into(),
-            }),
-        )
-        .await
-        .unwrap();
     response_json(
         t.upload_form(&r, "linux-x86_64", "installer.deb", None, None)
             .await,
         201,
     )
     .await;
-    // The global default still resolves, but /latest?target=linux-x86_64 would break.
-    let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
-    assert_eq!(
-        response_json(
-            t.upload_form(&r, "linux-x86_64", "installer.rpm", None, None)
-                .await,
-            409
-        )
-        .await["error"]["code"],
-        "default_installer_required"
-    );
-    assert_eq!(t.state.releases.get(&t.app, &r.id).await.unwrap(), before);
-    // Multiple installer formats on the default target remain supported.
+    response_json(
+        t.upload_form(&r, "linux-x86_64", "installer.rpm", None, None)
+            .await,
+        201,
+    )
+    .await;
     response_json(
         t.upload_form(&r, "windows-x86_64", "installer.msi", None, None)
             .await,
@@ -1850,7 +1467,7 @@ async fn failed_published_append_rolls_back_and_reclaims_file_and_rechecks_live_
     let t = TestApp::new().await;
     let r = t.create("0.5.0").await;
     let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
     sqlx::query("CREATE TRIGGER fail_revision BEFORE UPDATE OF revision ON releases BEGIN SELECT RAISE(ABORT,'test rollback'); END").execute(&t.state.database).await.unwrap();
     response_json(

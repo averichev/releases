@@ -1,3 +1,4 @@
+// Transitional compatibility tests for immutable historical SQLite schemas.
 use tempfile::tempdir;
 use veruna_releases::{config::AppConfig, initialize};
 
@@ -39,13 +40,10 @@ async fn creates_configured_paths_and_applies_baseline_once() {
         tables,
         vec![
             "_sqlx_migrations",
-            "application_distribution",
             "applications",
             "artifacts",
-            "channel_releases",
             "login_attempts",
             "publication_history",
-            "release_channels",
             "releases",
             "sessions",
             "user_tokens",
@@ -60,7 +58,7 @@ async fn creates_configured_paths_and_applies_baseline_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(migrations, 8);
+    assert_eq!(migrations, 9);
     pool.close().await;
 }
 
@@ -125,12 +123,12 @@ async fn catalog_migration_preserves_an_existing_identity_database() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        8
+        9
     );
 }
 
 #[tokio::test]
-async fn publication_migration_preserves_stage_four_objects_and_backfills_channels() {
+async fn publication_migration_preserves_stage_four_objects() {
     let dir = tempdir().unwrap();
     let mut config = AppConfig::default();
     config.database.path = dir.path().join("existing.sqlite");
@@ -193,11 +191,6 @@ async fn publication_migration_preserves_stage_four_objects_and_backfills_channe
         std::fs::read(config.storage.directory.join(&key)).unwrap(),
         b"abc"
     );
-    let channels = veruna_releases::repositories::channel::ChannelsRepository::new(pool.clone())
-        .list(&app)
-        .await
-        .unwrap();
-    assert_eq!(channels.len(), 2);
     let public_key: Option<String> =
         sqlx::query_scalar("SELECT tauri_public_key FROM applications WHERE id=?")
             .bind(&app)
@@ -205,10 +198,6 @@ async fn publication_migration_preserves_stage_four_objects_and_backfills_channe
             .await
             .unwrap();
     assert!(public_key.is_none());
-    for c in channels {
-        assert!(uuid::Uuid::parse_str(&c.id).is_ok());
-        assert_eq!(c.release_count, 0);
-    }
     assert!(
         sqlx::query("PRAGMA foreign_key_check")
             .fetch_all(&pool)
@@ -219,17 +208,17 @@ async fn publication_migration_preserves_stage_four_objects_and_backfills_channe
     pool.close().await;
     let pool = initialize(&config).await.unwrap();
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM release_channels")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('release_channels','channel_releases','application_distribution')")
             .fetch_one(&pool)
             .await
             .unwrap(),
-        2
+        0
     );
     pool.close().await;
 }
 
 #[tokio::test]
-async fn append_migration_preserves_published_signed_artifacts_and_channel_links() {
+async fn migrations_preserve_published_signed_artifacts_and_publication_facts() {
     use base64::{Engine, engine::general_purpose::STANDARD};
     use veruna_releases::{
         application_state,
@@ -238,7 +227,6 @@ async fn append_migration_preserves_published_signed_artifacts_and_channel_links
             artifact::UploadMetadata,
             release::ReleaseInput,
         },
-        services::publishing::PublicationCommand,
     };
     let dir = tempdir().unwrap();
     let mut config = AppConfig::default();
@@ -335,23 +323,28 @@ async fn append_migration_preserves_published_signed_artifacts_and_channel_links
     pending.set_signature(sig.as_bytes()).unwrap();
     pending.write(b"package").await.unwrap();
     let a = state.artifacts.complete(&actor, pending).await.unwrap();
-    state
-        .publishing
-        .publish(
-            &actor,
-            &app.id,
-            &r.id,
-            PublicationCommand {
-                channel: "stable".into(),
-                expected_channel_revision: 0,
-                expected_release_revision: 1,
-            },
-        )
+    sqlx::query("UPDATE releases SET status='published',published_at=updated_at WHERE id=?")
+        .bind(&r.id)
+        .execute(&pool)
         .await
         .unwrap();
+    let old_channel: String = sqlx::query_scalar(
+        "SELECT id FROM release_channels WHERE application_id=? AND name='stable'",
+    )
+    .bind(&app.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO channel_releases(channel_id,application_id,release_id,added_at) VALUES(?,?,?,1)").bind(&old_channel).bind(&app.id).bind(&r.id).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE release_channels SET current_release_id=? WHERE id=?")
+        .bind(&r.id)
+        .bind(&old_channel)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO publication_history(application_id,channel_id,release_id,action,new_release_id,user_id,created_at) VALUES(?,?,?,'release_published',?,?,1)").bind(&app.id).bind(&old_channel).bind(&r.id).bind(&r.id).bind(&actor.user.id).execute(&pool).await.unwrap();
     let before = state.releases.get(&app.id, &r.id).await.unwrap();
-    let links: Vec<(String, String, i64, String, String, i64)> = sqlx::query_as("SELECT c.id,c.current_release_id,c.revision,cr.release_id,cr.application_id,cr.added_at FROM release_channels c JOIN channel_releases cr ON cr.channel_id=c.id").fetch_all(&pool).await.unwrap();
-    let history: Vec<(i64, String, String, String, String, String, i64)> = sqlx::query_as("SELECT id,application_id,channel_id,release_id,action,user_id,created_at FROM publication_history").fetch_all(&pool).await.unwrap();
+    let history: Vec<(i64, String, String, String, i64)> = sqlx::query_as("SELECT id,application_id,release_id,user_id,created_at FROM publication_history WHERE action='release_published'").fetch_all(&pool).await.unwrap();
     drop(state);
     pool.close().await;
     let pool = initialize(&config).await.unwrap();
@@ -365,8 +358,15 @@ async fn append_migration_preserves_published_signed_artifacts_and_channel_links
         std::fs::read(config.storage.directory.join(&a.storage_key)).unwrap(),
         b"package"
     );
-    assert_eq!(sqlx::query_as::<_, (String, String, i64, String, String, i64)>("SELECT c.id,c.current_release_id,c.revision,cr.release_id,cr.application_id,cr.added_at FROM release_channels c JOIN channel_releases cr ON cr.channel_id=c.id").fetch_all(&pool).await.unwrap(), links);
-    assert_eq!(sqlx::query_as::<_, (i64, String, String, String, String, String, i64)>("SELECT id,application_id,channel_id,release_id,action,user_id,created_at FROM publication_history").fetch_all(&pool).await.unwrap(), history);
+    assert_eq!(
+        sqlx::query_as::<_, (i64, String, String, String, i64)>(
+            "SELECT id,application_id,release_id,user_id,created_at FROM publication_history"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap(),
+        history
+    );
     assert!(
         sqlx::query("PRAGMA foreign_key_check")
             .fetch_all(&pool)
@@ -382,7 +382,7 @@ async fn append_migration_preserves_published_signed_artifacts_and_channel_links
             .fetch_one(&pool)
             .await
             .unwrap(),
-        8
+        9
     );
     pool.close().await;
 }
@@ -456,4 +456,86 @@ async fn append_migration_rejects_legacy_updater_duplicates_without_losing_data(
             .unwrap()
             .is_empty()
     );
+}
+
+// Explicit transitional compatibility policy: never expose beta-only data implicitly.
+#[tokio::test]
+async fn migration_requires_explicit_owner_policy_before_expanding_publications() {
+    let dir = tempdir().unwrap();
+    let old = dir.path().join("old");
+    std::fs::create_dir(&old).unwrap();
+    for entry in std::fs::read_dir("migrations").unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_str().unwrap() < "0009" {
+            std::fs::copy(entry.path(), old.join(entry.file_name())).unwrap();
+        }
+    }
+    let mut config = AppConfig::default();
+    config.database.path = dir.path().join("existing.sqlite");
+    config.storage.directory = dir.path().join("files");
+    config.storage.icons_directory = dir.path().join("icons");
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&config.database.path)
+            .create_if_missing(true)
+            .foreign_keys(true),
+    )
+    .await
+    .unwrap();
+    sqlx::migrate::Migrator::new(old.as_path())
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+    let app = uuid::Uuid::new_v4().to_string();
+    let release = uuid::Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO applications(id,slug,name,name_search,visibility,status,created_at,updated_at) VALUES(?,'old-app','Old App','old app','public','active',1,1)").bind(&app).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO releases(id,application_id,version,version_key,status,published_at,created_at,updated_at) VALUES(?,?,'2.0.0','2.0.0','published',1,1,1)").bind(&release).bind(&app).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO channel_releases(channel_id,application_id,release_id,added_at) SELECT id,application_id,?,1 FROM release_channels WHERE application_id=? AND name='beta'").bind(&release).bind(&app).execute(&pool).await.unwrap();
+    let error = format!("{:#}", initialize(&config).await.unwrap_err());
+    assert!(error.contains("publication_migration_policy"), "{error}");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM _sqlx_migrations WHERE success=1")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        8
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT status FROM releases WHERE id=?")
+            .bind(&release)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "published"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM release_channels")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        2
+    );
+    // Explicit per-release owner opt-in, as documented; does not alter files or publication date.
+    sqlx::query("INSERT INTO channel_releases(channel_id,application_id,release_id,added_at) SELECT id,application_id,?,1 FROM release_channels WHERE application_id=? AND name='stable'").bind(&release).bind(&app).execute(&pool).await.unwrap();
+    pool.close().await;
+    let migrated = initialize(&config).await.unwrap();
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&migrated)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT version FROM releases WHERE id=?")
+            .bind(&release)
+            .fetch_one(&migrated)
+            .await
+            .unwrap(),
+        "2.0.0"
+    );
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('release_channels','channel_releases','application_distribution')").fetch_one(&migrated).await.unwrap(), 0);
+    migrated.close().await;
 }

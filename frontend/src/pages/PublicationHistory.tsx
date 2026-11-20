@@ -11,10 +11,9 @@ export default function PublicationHistory({ app }: { app: string }) {
     api<PublicationEvent[]>(`${applicationPath(app)}/publication-history?limit=50${cursor ? `&before=${cursor}` : ''}`, 'GET', undefined, controller.signal).then((rows) => { if (!controller.signal.aborted) { setEvents((previous) => cursor ? [...previous, ...rows] : rows); setMore(rows.length === 50); setBusy(false); } }, (e) => { if (!controller.signal.aborted) { setError(releaseError(e)); setBusy(false); } });
     return () => controller.abort();
   }, [app, cursor, attempt]);
-  const actions: Record<string, string> = { release_published: 'Релиз опубликован', channel_promoted: 'Канал переключён', channel_rolled_back: 'Откат канала' };
   return <Card title="История публикаций">
     {error && <Alert type="error" title={error} showIcon action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} />}
-    <Table<PublicationEvent> rowKey="id" loading={busy} dataSource={events} pagination={false} scroll={{ x: 750 }} locale={{ emptyText: <Empty description="Публикаций пока нет" /> }} columns={[{ title: 'Дата', dataIndex: 'created_at', render: date }, { title: 'Пользователь', dataIndex: 'username' }, { title: 'Канал', dataIndex: 'channel' }, { title: 'Действие', dataIndex: 'action', render: (v: string) => actions[v] ?? v }, { title: 'Предыдущая версия', dataIndex: 'previous_version', render: (v: string | null) => v ?? '—' }, { title: 'Новая версия', dataIndex: 'new_version' }]} />
+    <Table<PublicationEvent> rowKey="id" loading={busy} dataSource={events} pagination={false} scroll={{ x: 750 }} locale={{ emptyText: <Empty description="Публикаций пока нет" /> }} columns={[{ title: 'Дата', dataIndex: 'created_at', render: date }, { title: 'Пользователь', dataIndex: 'username' }, { title: 'Версия', dataIndex: 'version' }]} />
     {more && <Button disabled={busy} onClick={() => setCursor(events.at(-1)?.id)}>Загрузить ещё</Button>}
   </Card>;
 }

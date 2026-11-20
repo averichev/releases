@@ -2,7 +2,7 @@ import { ApiError } from './client';
 import { applicationPath } from './applications';
 export interface Release {
   id: string; application_id: string; version: string; title: string | null; release_notes: string;
-  status: 'draft' | 'published'; revision: number; channels: string[]; created_at: number; updated_at: number; published_at: number | null; artifact_count: number; total_size_bytes: number;
+  status: 'draft' | 'published'; revision: number; created_at: number; updated_at: number; published_at: number | null; artifact_count: number; total_size_bytes: number;
 }
 export interface ReleaseValues { version: string; title?: string; release_notes: string }
 export interface ReleasePage { items: Release[]; total: number; page: number; per_page: number }

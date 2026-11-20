@@ -136,7 +136,7 @@ def main():
             nested, nested_headers = call(f'/admin/applications/{application["id"]}/settings')
             assert nested_headers["Content-Type"].startswith("text/html") and nested == html
             integration_path = application_path + "/integrations/tauri"
-            nested, nested_headers = call(f'/admin/applications/{application["id"]}/integrations/tauri?step=3&channel=beta')
+            nested, nested_headers = call(f'/admin/applications/{application["id"]}/integrations/tauri?step=3')
             assert nested == html and nested_headers["Content-Type"].startswith("text/html")
             integration, _ = call(integration_path)
             assert integration["public_key"] is None and integration["configuration"] is None and not integration["ready"]
@@ -145,10 +145,10 @@ def main():
             call(integration_path, "PUT", {"public_key": public_key}, expected=403)
             call(integration_path, "PUT", {"public_key": public_key}, csrf, 204)
             call(integration_path, "PUT", {"private_key": "never accepted"}, csrf, 400)
-            integration, _ = call(integration_path + "?channel=beta")
+            integration, _ = call(integration_path)
             assert integration["public_key"] == public_key
             assert integration["configuration"]["plugins"]["updater"]["pubkey"] == public_key
-            assert integration["endpoint"] == base + "/api/v1/updates/tauri/catalog-smoke/beta/{{target}}/{{arch}}/{{current_version}}"
+            assert integration["endpoint"] == base + "/api/v1/updates/tauri/catalog-smoke/{{target}}/{{arch}}/{{current_version}}"
             release, _ = call(application_path + "/releases", "POST", {"version": " v1.2.0 ", "release_notes": "Smoke changes"}, csrf, 201)
             assert release["version"] == "1.2.0" and release["status"] == "draft" and release["published_at"] is None
             release_path = application_path + "/releases/" + release["id"]
@@ -192,7 +192,7 @@ def main():
             call(integration_path)
             call(integration_path, "PUT", {"public_key": public_key}, operator["csrf_token"], 403)
             call(integration_path + "/readiness", "POST", csrf=operator["csrf_token"])
-            call(application_path + "/updater/tauri/preview", "POST", {"channel": "stable", "target": "windows-x86_64", "current_version": "1.0.0"}, operator["csrf_token"])
+            call(application_path + "/updater/tauri/preview", "POST", {"target": "windows-x86_64", "current_version": "1.0.0"}, operator["csrf_token"])
             call("/api/v1/auth/logout", "POST", csrf=operator["csrf_token"], expected=204)
             recovery = subprocess.run([str(binary), "admin", "reset-password", "--stdin"],
                                       input="owner\n", text=True, capture_output=True,
@@ -209,7 +209,7 @@ def main():
             call(release_path, "DELETE", csrf=recovered["csrf_token"], expected=204)
             call(release_path, expected=404)
             # Stage 5 uses the standalone binary too: real publication, manifests,
-            # signed updater diagnostics, pointer rollback, and immutable files.
+            # signed updater diagnostics and immutable files.
             def uploaded_release(version):
                 row, _ = call(application_path + "/releases", "POST", {"version": version}, recovered["csrf_token"], 201)
                 path = application_path + "/releases/" + row["id"]
@@ -225,13 +225,13 @@ def main():
             global_signature = base64.b64encode(bytes(64)).decode()
             signature = base64.b64encode(f"untrusted comment: smoke signature\n{packet}\ntrusted comment: smoke\n{global_signature}\n".encode())
             call(artifact_path + "/signature", "PUT", signature, recovered["csrf_token"], content_type="application/octet-stream")
-            ready, _ = call(published_path + "/validate-publication", "POST", {"channel": "beta"}, recovered["csrf_token"])
+            ready, _ = call(published_path + "/validate-publication", "POST", {}, recovered["csrf_token"])
             assert ready["validation"]["state"] == "ready"
-            call(published_path + "/publish", "POST", {"channel": "beta", "expected_channel_revision": ready["channel"]["revision"], "expected_release_revision": ready["release_revision"]}, recovered["csrf_token"])
+            call(published_path + "/publish", "POST", {"expected_release_revision": ready["release_revision"]}, recovered["csrf_token"])
             current_release, _ = call(published_path)
-            call(application_path + "/channels/stable/current", "PUT", {"release_id": published["id"], "expected_channel_revision": 0, "expected_release_revision": current_release["revision"]}, recovered["csrf_token"])
+            assert current_release["status"] == "published"
             manifest, manifest_headers = call("/catalog-smoke/manifest.json", opener=build_opener())
-            assert manifest["schema_version"] == 1 and manifest["latest"] == "2.0.0" and "ETag" in manifest_headers
+            assert manifest["schema_version"] == 2 and manifest["releases"][0]["version"] == "2.0.0" and "ETag" in manifest_headers
             download_url = manifest["releases"][0]["artifacts"][0]["download_url"]
             assert download_url.startswith(base + "/catalog-smoke/releases/2.0.0/artifacts/")
             public_path = download_url.removeprefix(base)
@@ -241,29 +241,30 @@ def main():
                 assert int(head.headers["Content-Length"]) == len(download) and not head.read()
             with build_opener().open(Request(download_url, headers={"Range": "bytes=1-3"})) as partial:
                 assert partial.status == 206 and partial.read() == download[1:4]
-            update, _ = call("/api/v1/updates/tauri/catalog-smoke/stable/windows/x86_64/1.0.0", opener=build_opener())
+            update, _ = call("/api/v1/updates/tauri/catalog-smoke/windows/x86_64/1.0.0", opener=build_opener())
             assert update["url"] == download_url and update["signature"] == signature.decode()
-            no_update, _ = call("/api/v1/updates/tauri/catalog-smoke/stable/windows/x86_64/2.0.0", opener=build_opener(), expected=204)
+            no_update, _ = call("/api/v1/updates/tauri/catalog-smoke/windows/x86_64/2.0.0", opener=build_opener(), expected=204)
             assert not no_update
             page, metadata = call("/catalog-smoke", opener=build_opener())
             assert page and metadata["Content-Type"].startswith("text/html")
-            preview, _ = call(application_path + "/updater/tauri/preview", "POST", {"channel": "stable", "target": "windows-x86_64", "current_version": "1.0.0"}, recovered["csrf_token"])
+            preview, _ = call(application_path + "/updater/tauri/preview", "POST", {"target": "windows-x86_64", "current_version": "1.0.0"}, recovered["csrf_token"])
             assert preview["reason"] == "update_available" and preview["response"]["url"] == download_url
             call(artifact_path, "DELETE", csrf=recovered["csrf_token"], expected=409)
             call(published_path, "PATCH", {"release_notes": "forbidden"}, recovered["csrf_token"], 409)
             newer, newer_path, _ = uploaded_release("3.0.0")
-            ready, _ = call(newer_path + "/validate-publication", "POST", {"channel": "stable"}, recovered["csrf_token"])
-            call(newer_path + "/publish", "POST", {"channel": "stable", "expected_channel_revision": ready["channel"]["revision"], "expected_release_revision": ready["release_revision"]}, recovered["csrf_token"])
-            channels, _ = call(application_path + "/channels")
-            stable = next(channel for channel in channels if channel["name"] == "stable")
-            call(application_path + "/channels/stable/current", "PUT", {"release_id": published["id"], "expected_channel_revision": stable["revision"], "expected_release_revision": current_release["revision"]}, recovered["csrf_token"])
+            ready, _ = call(newer_path + "/validate-publication", "POST", {}, recovered["csrf_token"])
+            call(newer_path + "/publish", "POST", {"expected_release_revision": ready["release_revision"]}, recovered["csrf_token"])
             manifest, _ = call("/catalog-smoke/manifest.json?limit=1", opener=build_opener())
-            assert manifest["latest"] == "2.0.0" and manifest["releases"][0]["version"] == "2.0.0"
+            assert manifest["latest_by_target"]["windows-x86_64"]["version"] == "3.0.0" and manifest["releases"][0]["version"] == "3.0.0"
             history, _ = call(application_path + "/publication-history")
-            assert history[0]["action"] == "channel_rolled_back" and history[0]["previous_version"] == "3.0.0"
+            assert history[0]["version"] == "3.0.0" and len(history) == 2
+            latest_bytes, _ = call("/catalog-smoke/latest/windows-x86_64", opener=build_opener())
+            assert latest_bytes == b"package"
+            choice, choice_headers = call("/catalog-smoke/latest", opener=build_opener())
+            assert choice == page and choice_headers["Content-Type"].startswith("text/html")
             call(application_path, "PATCH", {"visibility": "private"}, recovered["csrf_token"])
             call("/catalog-smoke/manifest.json", opener=build_opener(), expected=404)
-            call(application_path + "/manifests/stable/preview")
+            call(application_path + "/manifests/preview")
             call("/api/v1/auth/logout", "POST", csrf=recovered["csrf_token"], expected=204)
             assert (root / "storage/artifacts").is_dir()
             with sqlite3.connect(root / "state/db/releases.sqlite") as database:
@@ -278,7 +279,7 @@ def main():
             logs = log_path.read_text()
             assert "Veruna Releases stopped" in logs
             assert all(value not in logs for value in secret_values), "Secret leaked into logs"
-            print("Smoke passed: standalone assets, CLI bootstrap/recovery, sessions/CSRF, catalog lifecycle/search, icons, draft releases, multipart uploads/SHA-256/downloads/deletion, publication/channels/rollback/history, public downloads/HEAD/Range/manifests/privacy, Tauri integration/public key/HTTP/signature/preview, immutability, nested routes, role boundaries, safe logs, WAL, migrations, SIGTERM.")
+            print("Smoke passed: standalone assets, CLI recovery, sessions/CSRF, catalog, uploads/SHA-256, publication/history, platform latest, manifest v2, downloads/HEAD/Range, Tauri, immutability, nested routes, safe logs, WAL, migrations, SIGTERM.")
         finally:
             if process.poll() is None:
                 process.kill()

@@ -113,23 +113,3 @@ pub struct ApplicationChanges {
     pub description: Option<String>,
     pub visibility: Option<Visibility>,
 }
-
-/// Mutable application preference; published artifacts remain immutable.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DistributionSelector {
-    pub target: String,
-    pub format: String,
-    pub purpose: String,
-}
-impl DistributionSelector {
-    pub fn valid(&self) -> bool {
-        super::artifact::TARGETS.contains(&self.target.as_str())
-            && super::artifact::valid_file_type(&self.format)
-            && self.purpose == "installer"
-    }
-    pub fn matches(&self, artifact: &super::artifact::Artifact) -> bool {
-        artifact.target == self.target
-            && artifact.file_type == self.format
-            && artifact.distribution_role == self.purpose
-    }
-}

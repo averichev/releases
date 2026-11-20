@@ -1,18 +1,23 @@
 use super::{
-    applications::ApplicationsRepository,
-    artifact::ArtifactsRepository,
-    channel::{ChannelsRepository, PublicationSnapshot},
+    applications::ApplicationsRepository, artifact::ArtifactsRepository,
     release::ReleasesRepository,
 };
 use crate::{
-    domain::{
-        application::DistributionSelector,
-        release::{Release, ReleaseStatus},
-    },
+    domain::{application::Application, artifact::Artifact, release::Release},
     services::error::{Result, ServiceError},
 };
 use sqlx::{SqliteConnection, SqlitePool};
 
+pub struct PublicationSnapshot {
+    pub application: Application,
+    pub release: Release,
+    pub artifacts: Vec<Artifact>,
+}
+/// Application and published files share one SQLite read snapshot.
+pub struct PublishedCatalog {
+    pub application: Application,
+    pub releases: Vec<(Release, Vec<Artifact>)>,
+}
 #[derive(Clone)]
 pub struct DistributionRepository {
     pool: SqlitePool,
@@ -21,116 +26,75 @@ impl DistributionRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
-    pub async fn selector(&self, app: &str) -> Result<Option<DistributionSelector>> {
-        Self::selector_in(&mut *self.pool.acquire().await?, app).await
-    }
-    pub async fn selector_in(
-        c: &mut SqliteConnection,
-        app: &str,
-    ) -> Result<Option<DistributionSelector>> {
-        let row: Option<(String, String, String)> = sqlx::query_as(
-            "SELECT target,format,purpose FROM application_distribution WHERE application_id=?",
-        )
-        .bind(app)
-        .fetch_optional(c)
-        .await?;
-        Ok(row.map(|(target, format, purpose)| DistributionSelector {
-            target,
-            format,
-            purpose,
-        }))
-    }
-    pub async fn set_selector(
-        c: &mut SqliteConnection,
-        app: &str,
-        value: Option<&DistributionSelector>,
-    ) -> Result<()> {
-        if let Some(s) = value {
-            sqlx::query("INSERT INTO application_distribution(application_id,target,format,purpose) VALUES(?,?,?,?) ON CONFLICT(application_id) DO UPDATE SET target=excluded.target,format=excluded.format,purpose=excluded.purpose")
-                .bind(app).bind(&s.target).bind(&s.format).bind(&s.purpose).execute(c).await?;
-        } else {
-            sqlx::query("DELETE FROM application_distribution WHERE application_id=?")
-                .bind(app)
-                .execute(c)
-                .await?;
-        }
-        Ok(())
-    }
-    pub async fn version(
-        &self,
-        slug: &str,
-        version: &str,
-        channel: &str,
-    ) -> Result<PublicationSnapshot> {
+    pub async fn snapshot(&self, app: &str, release: &str) -> Result<PublicationSnapshot> {
         let mut tx = self.pool.begin().await?;
-        let app = ApplicationsRepository::by_slug_in(&mut tx, slug).await?;
-        let channel = ChannelsRepository::get_in(&mut tx, &app.id, channel).await?;
-        let id: String = sqlx::query_scalar("SELECT r.id FROM releases r JOIN channel_releases cr ON cr.release_id=r.id WHERE r.application_id=? AND r.version=? AND r.status='published' AND cr.channel_id=?")
-            .bind(&app.id).bind(version).bind(&channel.id).fetch_optional(&mut *tx).await?.ok_or(ServiceError::NotFound)?;
-        let snapshot =
-            ChannelsRepository::snapshot_in(&mut tx, &app.id, &id, &channel.name).await?;
+        let snapshot = Self::snapshot_in(&mut tx, app, release).await?;
         tx.commit().await?;
         Ok(snapshot)
     }
-    pub async fn application(
-        &self,
-        key: &str,
-        public: bool,
-    ) -> Result<crate::domain::application::Application> {
-        let mut tx = self.pool.begin().await?;
-        let app = if public {
-            ApplicationsRepository::by_slug_in(&mut tx, key).await?
-        } else {
-            ApplicationsRepository::get_in(&mut tx, key).await?
-        };
-        tx.commit().await?;
-        Ok(app)
+    pub async fn snapshot_in(
+        c: &mut SqliteConnection,
+        app: &str,
+        release: &str,
+    ) -> Result<PublicationSnapshot> {
+        Ok(PublicationSnapshot {
+            application: ApplicationsRepository::get_in(c, app).await?,
+            release: ReleasesRepository::get_in(c, app, release).await?,
+            artifacts: ArtifactsRepository::list_in(c, release).await?,
+        })
     }
-    pub async fn history(
-        &self,
-        key: &str,
-        channel: &str,
-        public: bool,
-        limit: u32,
-        offset: u32,
-        current_first: bool,
-    ) -> Result<(
-        crate::domain::application::Application,
-        crate::domain::publication::ReleaseChannel,
-        Vec<(Release, Vec<crate::domain::artifact::Artifact>)>,
-        i64,
-    )> {
+    pub async fn version(&self, slug: &str, version: &str) -> Result<PublicationSnapshot> {
+        let mut tx = self.pool.begin().await?;
+        let app = ApplicationsRepository::by_slug_in(&mut tx, slug).await?;
+        let id: String = sqlx::query_scalar(
+            "SELECT id FROM releases WHERE application_id=? AND version=? AND status='published'",
+        )
+        .bind(&app.id)
+        .bind(version)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ServiceError::NotFound)?;
+        let snapshot = Self::snapshot_in(&mut tx, &app.id, &id).await?;
+        tx.commit().await?;
+        Ok(snapshot)
+    }
+    pub async fn application(&self, key: &str, public: bool) -> Result<Application> {
+        let mut c = self.pool.acquire().await?;
+        if public {
+            ApplicationsRepository::by_slug_in(&mut c, key).await
+        } else {
+            ApplicationsRepository::get_in(&mut c, key).await
+        }
+    }
+    pub async fn published(&self, key: &str, public: bool) -> Result<PublishedCatalog> {
         let mut tx = self.pool.begin().await?;
         let app = if public {
             ApplicationsRepository::by_slug_in(&mut tx, key).await?
         } else {
             ApplicationsRepository::get_in(&mut tx, key).await?
         };
-        let channel = ChannelsRepository::get_in(&mut tx, &app.id, channel).await?;
-        if current_first && channel.current_release_id.is_none() {
-            return Err(ServiceError::NotFound);
-        }
-        let preferred = if current_first {
-            channel.current_release_id.as_deref()
-        } else {
-            None
-        };
-        let total: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM channel_releases WHERE channel_id=?")
-                .bind(&channel.id)
-                .fetch_one(&mut *tx)
-                .await?;
-        let ids:Vec<String>=sqlx::query_scalar("SELECT r.id FROM releases r JOIN channel_releases cr ON cr.release_id=r.id WHERE cr.channel_id=? AND r.status='published' ORDER BY CASE WHEN r.id=? THEN 0 ELSE 1 END,r.published_at DESC,r.id LIMIT ? OFFSET ?")
-            .bind(&channel.id).bind(preferred).bind(limit).bind(offset).fetch_all(&mut *tx).await?;
-        let mut releases = Vec::new();
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM releases WHERE application_id=? AND status='published'",
+        )
+        .bind(&app.id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut releases = Vec::with_capacity(ids.len());
         for id in ids {
-            let r = ReleasesRepository::get_in(&mut tx, &app.id, &id).await?;
-            if r.status != ReleaseStatus::Published {
-                return Err(ServiceError::NotFound);
-            }
-            releases.push((r, ArtifactsRepository::list_in(&mut tx, &id).await?));
+            releases.push((
+                ReleasesRepository::get_in(&mut tx, &app.id, &id).await?,
+                ArtifactsRepository::list_in(&mut tx, &id).await?,
+            ));
         }
         tx.commit().await?;
-        Ok((app, channel, releases, total))
+        // SQLite strings do not implement SemVer precedence.
+        releases.sort_by(|(a, _), (b, _)| b.version.cmp_precedence(&a.version));
+        Ok(PublishedCatalog {
+            application: app,
+            releases,
+        })
+    }
+    pub async fn public_active(&self, id: &str) -> Result<bool> {
+        Ok(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM applications WHERE id=? AND status='active' AND visibility='public'").bind(id).fetch_one(&self.pool).await? == 1)
     }
 }

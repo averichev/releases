@@ -1,18 +1,5 @@
-use super::{artifact::Artifact, release::Release};
+use super::artifact::Artifact;
 
-#[derive(Clone, Debug)]
-pub struct ReleaseChannel {
-    pub id: String,
-    pub application_id: String,
-    pub name: String,
-    pub current_release_id: Option<String>,
-    pub current_version: Option<String>,
-    pub published_at: Option<i64>,
-    pub release_count: i64,
-    pub revision: i64,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Readiness {
     Ready,
@@ -44,14 +31,6 @@ impl PublicationValidation {
             warnings,
             errors,
         }
-    }
-}
-/// Channel version is an explicit pointer; version ordering only describes the action.
-pub fn switch_action(previous: Option<&Release>, next: &Release) -> &'static str {
-    if previous.is_some_and(|r| next.version.cmp_precedence(&r.version).is_lt()) {
-        "channel_rolled_back"
-    } else {
-        "channel_promoted"
     }
 }
 pub fn compatible_tauri_target(artifact: &Artifact) -> Option<&str> {

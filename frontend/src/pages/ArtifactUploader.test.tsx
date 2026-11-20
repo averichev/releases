@@ -84,7 +84,7 @@ it('checks conflicts by role and allows only one updater per target across forma
   fireEvent.click(screen.getByRole('button', { name: 'Загрузить файл' }));
   expect(await screen.findByText(/Для платформы допустим только один пакет обновления/)).toBeDefined();
 });
-it.each(['artifact_exists', 'updater_signature_required', 'default_installer_required'])('explains %s returned by the server in Russian', async (code) => {
+it.each(['artifact_exists', 'updater_signature_required'])('explains %s returned by the server in Russian', async (code) => {
   class RejectedXhr {
     upload = {}; status = code === 'updater_signature_required' ? 422 : 409; responseText = JSON.stringify({ error: { code } });
     onload?: () => void;
@@ -95,5 +95,5 @@ it.each(['artifact_exists', 'updater_signature_required', 'default_installer_req
   await chooseFile();
   fireEvent.click(screen.getByRole('button', { name: 'Загрузить файл' }));
   const alert = await screen.findByRole('alert');
-  expect(alert.textContent).toMatch(code === 'artifact_exists' ? /назначением уже есть/ : code === 'updater_signature_required' ? /корректный файл .sig/ : /Сначала настройте установщик по умолчанию/);
+  expect(alert.textContent).toMatch(code === 'artifact_exists' ? /назначением уже есть/ : /корректный файл .sig/);
 });

@@ -8,11 +8,12 @@ import { command, signer } from '../integrations/tauri';
 import CodeBlock from '../integrations/CodeBlock';
 import TauriIntegration from './TauriIntegration';
 const application: Application = {id: 'app-id', slug: 'product', name: 'Продукт', description: '', visibility: 'public', status: 'active', created_at: 1, updated_at: 1, icon_url: null};
-const endpoints = {stable: 'https://updates.example.test/api/v1/updates/tauri/product/stable/{{target}}/{{arch}}/{{current_version}}', beta: 'https://updates.example.test/api/v1/updates/tauri/product/beta/{{target}}/{{arch}}/{{current_version}}'};
-function settings(key: string | null = null, channel: 'stable' | 'beta' = 'stable'): TauriSettings {
-  return {public_key: key, public_base_url: 'https://updates.example.test', endpoint: endpoints[channel], endpoints, channel, current_version: null, published_release_exists: false, ready: false, packages: [], validation: null, full_integrity_checked: false,
-    blockers: [{code: 'channel_release_missing', artifact_id: null, message: 'Нет текущего релиза канала.'}],
-    configuration: key ? {bundle: {createUpdaterArtifacts: true}, plugins: {updater: {pubkey: key, endpoints: [endpoints[channel]]}}} : null};
+const endpoint = 'https://updates.example.test/api/v1/updates/tauri/product/{{target}}/{{arch}}/{{current_version}}';
+function settings(key: string | null = null): TauriSettings {
+  return {public_key: key, public_base_url: 'https://updates.example.test', endpoint,
+    published_release_exists: false, ready: false, packages: [], validation: null, full_integrity_checked: false,
+    blockers: [{code: 'published_release_missing', artifact_id: null, message: 'Нет опубликованного релиза.'}],
+    configuration: key ? {bundle: {createUpdaterArtifacts: true}, plugins: {updater: {pubkey: key, endpoints: [endpoint]}}} : null};
 }
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {status, headers: {'Content-Type': 'application/json'}});
 function show(query = '', administrator = true) {
@@ -43,22 +44,19 @@ it('copies the complete server-generated configuration including its key and pla
   show('?step=3'); fireEvent.click(await screen.findByRole('button', {name: 'Копировать Фрагмент tauri.conf.json'}));
   await waitFor(() => expect(copy).toHaveBeenCalled());
   const copied = JSON.parse(copy.mock.calls[0]![0] as string) as {plugins: {updater: {pubkey: string; endpoints: string[]}}};
-  expect(copied.plugins.updater.pubkey).toBe('saved-key'); expect(copied.plugins.updater.endpoints[0]).toBe(endpoints.stable);
+  expect(copied.plugins.updater.pubkey).toBe('saved-key'); expect(copied.plugins.updater.endpoints[0]).toBe(endpoint);
 });
-it('restores step and beta from the URL and uses server-generated stable data when switching', async () => {
-  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(json(settings('saved-key', url.includes('channel=beta') ? 'beta' : 'stable')))));
-  show('?step=3&channel=beta');
-  const block = await screen.findByLabelText('Фрагмент tauri.conf.json');
-  expect(block.textContent).toContain(endpoints.beta);
-  fireEvent.click(screen.getByText('Stable'));
-  await waitFor(() => expect(screen.getByLabelText('Фрагмент tauri.conf.json').textContent).toContain(endpoints.stable));
+it('restores the integration step from the URL', async () => {
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json(settings('saved-key')))));
+  show('?step=3');
+  expect((await screen.findByLabelText('Фрагмент tauri.conf.json')).textContent).toContain(endpoint);
 });
 it('shows available update details, its actual JSON and the public endpoint check', async () => {
   const response = {version: '1.0.1', url: 'https://updates.example.test/product/download', signature: 'test-signature', notes: '', pub_date: '2026-01-01T00:00:00Z'};
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url.startsWith('https://')) return Promise.resolve(json(response));
     if (url.endsWith('/preview')) {
-      expect(JSON.parse(String(init?.body))).toEqual({channel: 'stable', target: 'windows-x86_64', current_version: '1.0.0'});
+      expect(JSON.parse(String(init?.body))).toEqual({target: 'windows-x86_64', current_version: '1.0.0'});
       return Promise.resolve(json({state: 'available', message: 'Обновление доступно.', reason: 'update_available', selected_version: '1.0.1', artifact_id: 'file-id', artifact_filename: 'product.exe', signature_present: true, public_downloads_available: true, response}));
     }
     return Promise.resolve(json(settings('key')));
@@ -75,7 +73,7 @@ it('distinguishes a valid no-update preview from configuration and network error
   let fail = false;
   vi.stubGlobal('fetch', vi.fn((url: string) => {
     if (url.startsWith('https://')) return Promise.resolve(new Response(null, {status: 204}));
-    if (url.endsWith('/preview')) return Promise.resolve(fail ? json({error: {code: 'invalid_release'}}, 422) : json({state: 'no_update', reason: 'version_not_newer', message: 'Версия канала не новее клиента.', selected_version: '1.0.0', artifact_id: null, signature_present: false, public_downloads_available: true, response: null}));
+    if (url.endsWith('/preview')) return Promise.resolve(fail ? json({error: {code: 'invalid_release'}}, 422) : json({state: 'no_update', reason: 'version_not_newer', message: 'Опубликованная версия не новее клиента.', selected_version: '1.0.0', artifact_id: null, signature_present: false, public_downloads_available: true, response: null}));
     return Promise.resolve(json(settings('key')));
   }));
   show('?step=7'); fireEvent.click(await screen.findByRole('button', {name: 'Проверить обновление'}));
@@ -108,7 +106,7 @@ it('uses the selected package-manager CLI including npm signer argument forwardi
 it('reports a failed public endpoint separately from the successful server preview', async () => {
   vi.stubGlobal('fetch', vi.fn((url: string) => {
     if (url.startsWith('https://')) return Promise.reject(new Error('TLS/network failure'));
-    if (url.endsWith('/preview')) return Promise.resolve(json({state: 'no_update', reason: 'empty_channel', message: 'Канал пуст.', selected_version: null, artifact_id: null, signature_present: false, public_downloads_available: true, response: null}));
+    if (url.endsWith('/preview')) return Promise.resolve(json({state: 'no_update', reason: 'no_published_releases', message: 'Нет опубликованных релизов.', selected_version: null, artifact_id: null, signature_present: false, public_downloads_available: true, response: null}));
     return Promise.resolve(json(settings('key')));
   }));
   show('?step=7'); fireEvent.click(await screen.findByRole('button', {name: 'Проверить обновление'}));

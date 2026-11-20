@@ -59,11 +59,11 @@ function AdminLayout() {
 }
 
 function Placeholder({ title, description }: { title: string; description: string }) {
-  const withinApplication = title === 'Релизы' || title === 'Дистрибутивы' || title === 'Каналы';
+  const withinApplication = title === 'Релизы' || title === 'Дистрибутивы';
   return <>
     <div className="page-heading"><div className="eyebrow">ПАНЕЛЬ УПРАВЛЕНИЯ</div><Title level={1}>{title}</Title><Paragraph>{description}</Paragraph></div>
     <Card><Result icon={<SafetyCertificateOutlined />} title={withinApplication ? "Выберите приложение" : "Раздел запланирован"}
-      subTitle={withinApplication ? "Откройте приложение → Релизы или Каналы обновлений для управления версиями и файлами." : "Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."}
+      subTitle={withinApplication ? "Откройте приложение → Релизы для управления версиями и файлами." : "Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."}
       extra={<Link to={withinApplication ? "/admin/applications" : "/admin"}><Button>{withinApplication ? "Открыть приложения" : "Вернуться к обзору"}</Button></Link>} /></Card>
   </>;
 }
@@ -82,7 +82,7 @@ export function AppRoutes() {
       <Route path="applications" element={<Suspense fallback={<Spin />}><Applications /></Suspense>} />
       <Route path="applications/new" element={<Suspense fallback={<Spin />}><ApplicationCreate /></Suspense>} />
       <Route path="applications/:id/releases/:releaseId" element={<Suspense fallback={<Spin />}><ReleaseDetail /></Suspense>} />
-      {['applications/:id', 'applications/:id/settings', 'applications/:id/releases', 'applications/:id/channels', 'applications/:id/manifests', 'applications/:id/history', 'applications/:id/distribution', 'applications/:id/integrations/tauri'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
+      {['applications/:id', 'applications/:id/settings', 'applications/:id/releases', 'applications/:id/manifests', 'applications/:id/history', 'applications/:id/distribution', 'applications/:id/integrations/tauri'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
       {sections.filter((s) => s.path !== 'users' && s.path !== 'applications').map((section) => <Route key={section.path} path={section.path} element={<Placeholder title={section.title} description={section.description} />} />)}
       <Route path="*" element={<Result status="404" title="Страница не найдена" extra={<Link to="/admin">Вернуться к обзору</Link>} />} />
     </Route>

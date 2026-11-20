@@ -2,17 +2,17 @@
 use crate::{
     domain::application::{Status, Visibility},
     services::{
-        distribution::PublicDistribution,
+        distribution::{PublicDistribution, latest_installers},
         error::{Result, ServiceError},
     },
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
 #[derive(Serialize)]
 pub struct Manifest {
     pub schema_version: u32,
     pub app: String,
-    pub channel: String,
-    pub latest: String,
+    pub latest_by_target: BTreeMap<String, ManifestRelease>,
     pub releases: Vec<ManifestRelease>,
 }
 #[derive(Serialize)]
@@ -46,67 +46,68 @@ impl ManifestGeneration {
     pub fn new(distribution: PublicDistribution) -> Self {
         Self { distribution }
     }
-    pub async fn generate(
+    async fn document(
         &self,
-        key: &str,
-        channel: &str,
-        public: bool,
-        limit: u32,
-    ) -> Result<Manifest> {
+        slug: &str,
+        release: &crate::domain::release::Release,
+        artifacts: &[crate::domain::artifact::Artifact],
+        available: bool,
+    ) -> Result<ManifestRelease> {
+        let mut files = Vec::new();
+        for a in artifacts {
+            self.distribution.check_artifact(a).await?;
+            files.push(ManifestArtifact {
+                download_url: available.then(|| self.distribution.artifact_url(slug, release, a)),
+                id: a.id.clone(),
+                target: a.target.clone(),
+                format: a.file_type.clone(),
+                purpose: a.distribution_role.clone(),
+                size_bytes: a.size_bytes,
+                sha256: a.sha256.clone(),
+            });
+        }
+        Ok(ManifestRelease {
+            version: release.version.to_string(),
+            published_at: rfc3339(
+                release
+                    .published_at
+                    .ok_or(ServiceError::StorageUnavailable)?,
+            )?,
+            notes: release.release_notes.clone(),
+            artifacts: files,
+        })
+    }
+    pub async fn generate(&self, key: &str, public: bool, limit: u32) -> Result<Manifest> {
         if !(1..=100).contains(&limit) {
             return Err(ServiceError::Invalid);
         }
-        let history = self
-            .distribution
-            .manifest_history(key, channel, public, limit)
-            .await?;
-        let app = history.application;
-        let releases = history.releases;
-        let latest = releases
-            .first()
-            .ok_or(ServiceError::NotFound)?
-            .0
-            .version
-            .to_string();
+        let catalog = self.distribution.published(key, public).await?;
+        let app = &catalog.application;
         let available = app.status == Status::Active && app.visibility == Visibility::Public;
-        let mut documents = Vec::new();
-        for (release, artifacts) in releases {
-            let mut files = Vec::new();
-            for a in artifacts {
-                self.distribution.check_artifact(&a).await?;
-                files.push(ManifestArtifact {
-                    download_url: available.then(|| {
-                        self.distribution
-                            .artifact_url(&app.slug, &release, &a, channel)
-                    }),
-                    id: a.id,
-                    target: a.target,
-                    format: a.file_type,
-                    purpose: a.distribution_role,
-                    size_bytes: a.size_bytes,
-                    sha256: a.sha256,
-                });
-            }
-            documents.push(ManifestRelease {
-                version: release.version.to_string(),
-                published_at: rfc3339(
-                    release
-                        .published_at
-                        .ok_or(ServiceError::StorageUnavailable)?,
-                )?,
-                notes: release.release_notes,
-                artifacts: files,
-            });
+        let mut latest_by_target = BTreeMap::new();
+        // Compute before pagination so an older platform is never hidden by limit.
+        for (target, (release, artifacts)) in latest_installers(&catalog) {
+            latest_by_target.insert(
+                target,
+                self.document(&app.slug, &release, &artifacts, available)
+                    .await?,
+            );
+        }
+        let mut releases = Vec::new();
+        for (release, artifacts) in catalog.releases.iter().take(limit as usize) {
+            releases.push(
+                self.document(&app.slug, release, artifacts, available)
+                    .await?,
+            );
         }
         if public {
             self.distribution.recheck(&app.id).await?;
         }
         Ok(Manifest {
-            schema_version: 1,
-            app: app.slug,
-            channel: channel.into(),
-            latest,
-            releases: documents,
+            schema_version: 2,
+            app: app.slug.clone(),
+            latest_by_target,
+            releases,
         })
     }
 }

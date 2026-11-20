@@ -74,61 +74,34 @@ GET иконки защищён той же сессией и доступен �
 
 `POST /api/v1/admin/applications/{id}/releases/{releaseId}/artifacts` доступен admin для draft/published с прежними session/Origin/CSRF-проверками. Multipart: target, необязательные file_type/distribution_role до file, необязательный файловый part signature (.sig, до 16 КиБ) до или после file. Отсутствующая distribution_role означает installer. Детали и curl: [загрузка файлов](releases.md#административный-api).
 
-Уникальны target/format/role внутри релиза, updater допускается один на target независимо от формата. Конфликт загрузки или редактирования роли draft — 409 artifact_exists. Published updater без подписи в том же запросе — 422 updater_signature_required; некорректная подпись/совместимость — 422 invalid_updater. Неоднозначный выбор установщика после дополнения published — 409 default_installer_required: настройте default installer. Все ошибки сохраняют прежние записи, revision и публикацию.
+Уникальны target/format/role внутри релиза, updater допускается один на target независимо от формата. Конфликт загрузки или редактирования роли draft — 409 artifact_exists. Published updater без подписи в том же запросе — 422 updater_signature_required; некорректная подпись/совместимость — 422 invalid_updater. Несколько форматов установщика разрешены; неоднозначность проверяется при скачивании. Все ошибки сохраняют прежние записи, revision и публикацию.
 
-Успех: 201 Artifact DTO, атомарно увеличенный release.revision. Первоначальный published_at, updated_at, версия, каналы и история не меняются. Изменение/удаление старых published артефактов, включая подпись и роль, остаётся 409 release_locked. Повторная загрузка не заменяет прежний UUID.
+Успех: 201 Artifact DTO, атомарно увеличенный release.revision. Первоначальный published_at, updated_at, версия и история не меняются. Изменение/удаление старых published артефактов, включая подпись и роль, остаётся 409 release_locked. Повторная загрузка не заменяет прежний UUID.
 
-## Публикации и обновления (этап 5)
+## Публикации, манифесты и распространение
 
-Базовый путь для таблицы — `/api/v1/admin/applications/{applicationId}`. Все запросы требуют живую session cookie. Каналы/историю и Tauri preview читают admin/operator; validation публикации, preview универсального манифеста, публикацию, переключение и updater metadata — только admin. Все POST/PUT/DELETE проходят существующие Origin/custom-header/CSRF проверки, изменения повторно проверяют session/admin в write-транзакции.
+База `/api/v1/admin/applications/{id}`. Живая сессия обязательна; все mutations требуют Origin/custom-header/CSRF. Публикация, изменение ролей и подписей требуют admin и повторной проверки сессии в транзакции. Оператор читает историю, ссылки распространения и Tauri preview. Preview универсального манифеста требует admin.
 
 | Метод | Суффикс | Тело / результат |
 | --- | --- | --- |
-| GET | `/channels` | массив Channel DTO |
-| POST | `/releases/{releaseId}/validate-publication` | `{channel}` → `{release_revision,channel,validation}` |
-| POST | `/releases/{releaseId}/publish` | `{channel,expected_channel_revision,expected_release_revision}` → Channel DTO |
-| PUT | `/channels/{channel}/current` | `{release_id,expected_channel_revision,expected_release_revision}` → Channel DTO |
-| GET | `/publication-history?limit=50&before={eventId}` | массив событий; limit 1–100, cursor исключительный |
-| GET | `/manifests/{channel}/preview?limit=20` | универсальный манифест; limit 1–100 |
-| POST | `/updater/tauri/preview` | `{channel,target,current_version}` → диагностический TauriPreview |
-| PUT | `/releases/{releaseId}/artifacts/{artifactId}/updater` | `{distribution_role:"installer" или "updater"}` → Artifact DTO |
-| PUT | `/releases/{releaseId}/artifacts/{artifactId}/signature` | сырое содержимое `.sig`, до 16384 байт → Artifact DTO |
-| DELETE | `/releases/{releaseId}/artifacts/{artifactId}/signature` | очистить подпись → Artifact DTO |
+| POST | `/releases/{release}/validate-publication` | `{}` → `{release_revision,validation}` |
+| POST | `/releases/{release}/publish` | `{expected_release_revision}` → Release DTO |
+| GET | `/publication-history?limit=50&before={id}` | массив фактов публикации, limit 1–100 |
+| GET | `/manifests/preview?limit=20` | манифест schema_version=2, limit 1–100 |
+| POST | `/updater/tauri/preview` | `{target,current_version}` → TauriPreview |
+| PUT | `/releases/{release}/artifacts/{artifact}/updater` | `{distribution_role:"installer" или "updater"}` → Artifact DTO |
+| PUT | `/releases/{release}/artifacts/{artifact}/signature` | содержимое `.sig`, до 16384 байт → Artifact DTO |
+| DELETE | `/releases/{release}/artifacts/{artifact}/signature` | очистить подпись черновика |
+| GET | `/distribution` | public_available, application_url, latest_url, manifest_url, tauri_url, downloads |
+| GET | `/distribution/releases/{release}` | public_available, files с постоянными URL, warnings |
 
-Публикация draft в канал и переключение current атомарны с history. Publish также может назначить уже опубликованный релиз в другой канал, не меняя опубликованные метаданные; обычный UI использует для этого переключение. Нельзя опубликовать/переключить в архивном приложении или назначить prerelease в stable. Переключение требует опубликованный релиз. Любой UUID чужого приложения даёт 404.
+Validation: state=ready|warnings|errors, warnings/errors с code,artifact_id,message. Для публикации используйте revision из проверки. Сервер заново проверяет файлы и snapshot; конфликт — 409 publication_conflict, ошибки готовности — 422 publication_blocked с validation. Завершённый повтор идемпотентен. Установленный published защищён от редактирования/удаления; разрешено добавление новых неизменяемых файлов.
 
-Channel DTO: `id,application_id,name,current_release_id,current_version,published_at,release_count,revision,created_at,updated_at`. Пустой канал содержит NULL current/published_at и count=0. Release DTO расширен `revision,channels`, status допускает published. Artifact DTO расширен `distribution_role,signature_present`; содержимое подписи, storage_key и путь не возвращаются. GET списка релизов поддерживает необязательный `status=draft|published`.
+History DTO: id,application_id,release_id,version,user_id,username,created_at; id DESC, cursor before исключительный. `downloads[]`: target,version,formats,url,format_urls[{format,url}]. URL платформы при нескольких форматах требует уточнения format. Private/archived показывают ссылки с public_available=false, private preview не включает download_url.
 
-Validation: `state=ready|warnings|errors`, массивы `warnings` и `errors`; каждый issue содержит `code,artifact_id,message`. Наличие errors запрещает публикацию. В validation API published релиз получает `release_published`; этот endpoint проверяет готовность нового draft. Signature missing у явно назначенного updater — warning. Обязательного набора целевых платформ у универсального приложения нет.
+TauriPreview: state,reason,message,selected_version,artifact_id,artifact_filename,signature_present,public_downloads_available,response. `available` содержит реальный Tauri JSON, `no_update` объясняет отсутствие новой версии/пакета, `blocked` — ошибку файла/подписи/публичности. Алгоритм тот же, что у публичного endpoint; этот диагностический API не предназначен для production-клиента.
 
-При публикации используйте revision из последней проверки, а не timestamp:
-
-```json
-{"channel":"stable","expected_channel_revision":3,"expected_release_revision":6}
-```
-
-409 `publication_conflict` требует обновить данные и пересмотреть подтверждение. Завершённый повтор, когда тот же published уже current, идемпотентен: нет новой истории/revision. 422 `publication_blocked` возвращает общий error envelope и дополнительное поле `validation` с конкретными проблемами. Проверка files/SHA-256 выполняется заново, даже если preflight успешно завершился ранее. Недоступное storage из-за занятости возвращает 503 `storage_busy`.
-
-History DTO: `id,application_id,release_id,channel,action,previous_release_id,previous_version,new_release_id,new_version,user_id,username,created_at`. Порядок id DESC; для следующей страницы передайте последний id как before. Изменять историю через API нельзя.
-
-Подпись можно прикрепить только draft artifact с ролью updater; повторный PUT заменяет её, DELETE очищает. Переключение роли на installer удаляет подпись. При несовместимых target/format, неверной структуре подписи, пути/URL/key-файле — 422 `invalid_updater`. Превышение сырого тела — 413. Проверка структуры `.sig` не заменяет криптографическую проверку клиентом. Все metadata/подписи опубликованного файла защищены 409 `release_locked`.
-
-TauriPreview: `state,reason,message,selected_version,artifact_id,artifact_filename,signature_present,public_downloads_available,response`. При успешном выборе подписанного публичного пакета reason=update_available, state=available, response содержит Tauri JSON и public_downloads_available=true. При той же/старшей версии клиента — version_not_newer. Другие причины и модель описаны в [управлении релизами](release-management.md). Этот административный endpoint не является production updater; он не отдаёт протокольный 204/200 и не публикуется клиентам.
-
-Все административные ответы — no-store. Некорректные JSON/unknown fields/query — 400, неверный SemVer — 422, несуществующие ресурсы — 404, middleware gates — 401/403. Новые JSON/подписи ограничены 16 КиБ; входные имена/версии дополнительно ограничены доменными правилами. При 422 publication_blocked клиент показывает validation из ответа. Полный публичный контракт `GET /{slug}/manifest.json`, ETag и 404 для private/archived описаны в [release-management.md](release-management.md#универсальный-манифест).
-
-
-## Распространение (этап 6)
-
-База `/api/v1/admin/applications/{applicationId}`; все ответы no-store.
-
-| Метод | Суффикс | Роль / результат |
-| --- | --- | --- |
-| GET | `/distribution` | admin/operator: публичные URL, public_available, channels[{name,version}], default_distribution |
-| PUT | `/distribution/default` | admin + CSRF: `{target,format,purpose:"installer"}` либо `null` для сброса; 204 |
-| GET | `/distribution/releases/{releaseId}` | admin/operator: public_available, files[{id,url,tauri_compatible,signature_present}], warnings[] |
-
-Селектор валидируется доменом, сессия/роль перепроверяются внутри write transaction. Неизвестные поля — 400, неверный target/format/purpose — 422, session/CSRF/role — 401/403. Селектор не связан с изменением опубликованных файлов; неизвестный UUID/чужой release — 404. default_distribution_missing появляется как warning при проверке публикации. Публичные ссылки private/archived показываются как настройки с предупреждением о недоступности; private preview манифеста не включает download_url. Public API и HTTP Range: [public-distribution.md](public-distribution.md). Updater: [integrations/tauri.md](integrations/tauri.md).
+Подпись/роль меняются только у draft; published — 409 release_locked. Неверная структура `.sig`/совместимость — 422 invalid_updater, слишком большое тело — 413. Серверная проверка envelope не заменяет криптографическую проверку подписи клиентом. Все ответы admin — no-store; неизвестные поля/query — 400, session/role/CSRF — 401/403, чужие UUID — 404. [Публичное API](public-distribution.md), [правила публикации](release-management.md).
 
 ## Настройка Tauri-интеграции
 

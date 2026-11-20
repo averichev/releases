@@ -27,7 +27,6 @@ pub enum ApiError {
     InvalidArtifact,
     ArtifactConflict,
     UpdaterSignatureRequired,
-    DefaultInstallerRequired,
     PayloadTooLarge,
     UploadTimeout,
     StorageFull,
@@ -57,7 +56,7 @@ impl IntoResponse for ApiError {
             Self::AmbiguousArtifact => (
                 StatusCode::CONFLICT,
                 "ambiguous_artifact",
-                "Specify target, format or purpose, or configure the default distribution",
+                "Specify target and format to select an installer",
             ),
             Self::UpdaterUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -77,7 +76,7 @@ impl IntoResponse for ApiError {
             Self::PublicationConflict => (
                 StatusCode::CONFLICT,
                 "publication_conflict",
-                "Release or channel changed; reload and review",
+                "Release changed; reload and review",
             ),
             Self::InvalidUpdater => (
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -108,11 +107,6 @@ impl IntoResponse for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "updater_signature_required",
                 "Published updater requires a valid .sig in the same upload",
-            ),
-            Self::DefaultInstallerRequired => (
-                StatusCode::CONFLICT,
-                "default_installer_required",
-                "Configure the default installer before adding another installer; /latest would become ambiguous",
             ),
             Self::ArtifactConflict => (
                 StatusCode::CONFLICT,

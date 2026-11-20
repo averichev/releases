@@ -12,9 +12,7 @@ use veruna_releases::{
     application_state,
     config::{AppConfig, DeliveryMode},
     domain::{
-        application::{
-            ApplicationChanges, DistributionSelector, NewApplication, Status, Visibility,
-        },
+        application::{ApplicationChanges, NewApplication, Status, Visibility},
         artifact::{Artifact, UploadMetadata},
         release::{Release, ReleaseInput},
         user::Role,
@@ -125,16 +123,7 @@ impl TestApp {
             .await
             .unwrap()
     }
-    async fn publish(&self, r: &Release, name: &str) {
-        let channel = self
-            .state
-            .publishing
-            .channels(&self.app)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|c| c.name == name)
-            .unwrap();
+    async fn publish(&self, r: &Release) {
         let current = self.state.releases.get(&self.app, &r.id).await.unwrap();
         self.state
             .publishing
@@ -143,8 +132,6 @@ impl TestApp {
                 &self.app,
                 &r.id,
                 PublicationCommand {
-                    channel: name.into(),
-                    expected_channel_revision: channel.revision,
                     expected_release_revision: current.revision,
                 },
             )
@@ -191,10 +178,8 @@ impl TestApp {
             .await
             .unwrap()
     }
-    fn url(&self, r: &Release, a: &Artifact, channel: &str) -> String {
-        self.state
-            .distribution
-            .artifact_path("product", r, a, channel)
+    fn url(&self, r: &Release, a: &Artifact) -> String {
+        self.state.distribution.artifact_path("product", r, a)
     }
 }
 async fn bytes(r: Response) -> Vec<u8> {
@@ -221,7 +206,7 @@ const CORS_PATHS: [&str; 5] = [
     "/api/v1/public/applications/product",
     "/api/v1/public/applications/product/releases",
     "/api/v1/public/applications/product/icon",
-    "/api/v1/updates/tauri/product/stable/windows/x86_64/0.0.0",
+    "/api/v1/updates/tauri/product/windows/x86_64/0.0.0",
 ];
 
 fn assert_public_cors(response: &Response) {
@@ -270,11 +255,11 @@ async fn public_cors_preserves_get_head_manifest_etag_and_updater_no_content() {
         .set_icon(&t.actor, &t.app, Some(icon.into_inner()))
         .await
         .unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
 
     for path in CORS_PATHS
         .into_iter()
-        .chain(["/api/v1/updates/tauri/product/stable/windows/x86_64/1.0.0"])
+        .chain(["/api/v1/updates/tauri/product/windows/x86_64/1.0.0"])
     {
         let baseline = t.get("GET", path, &[]).await;
         let status = baseline.status();
@@ -385,7 +370,7 @@ async fn public_cors_covers_errors_without_bypassing_visibility_or_storage_check
     let t = TestApp::new(DeliveryMode::Direct).await;
     let r = t.create("1.0.0").await;
     let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     for origin in CORS_ORIGINS {
         for path in CORS_PATHS {
             let response = t
@@ -402,10 +387,7 @@ async fn public_cors_covers_errors_without_bypassing_visibility_or_storage_check
             ("/product/manifest.json?unknown=1", 400),
             ("/api/v1/public/applications/product?unknown=1", 400),
             ("/api/v1/public/applications/product/releases?limit=0", 400),
-            (
-                "/api/v1/updates/tauri/product/stable/windows/x86_64/invalid",
-                422,
-            ),
+            ("/api/v1/updates/tauri/product/windows/x86_64/invalid", 422),
         ] {
             let response = t.get("GET", path, &[("origin", origin)]).await;
             assert_eq!(response.status(), status, "{path}");
@@ -461,8 +443,8 @@ async fn cors_is_absent_from_admin_auth_downloads_and_unmatched_routes() {
     let t = TestApp::new(DeliveryMode::Direct).await;
     let r = t.create("1.0.0").await;
     let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
-    let download = t.url(&r, &a, "stable");
+    t.publish(&r).await;
+    let download = t.url(&r, &a);
     let cookie = format!("veruna_session={}", t.token);
     for origin in CORS_ORIGINS {
         for (path, anonymous_status, authenticated_status) in [
@@ -536,92 +518,6 @@ async fn public_cors_also_wraps_automatic_origin_resolution_errors() {
 }
 
 #[tokio::test]
-async fn shared_resolution_selectors_defaults_and_channel_rollback() {
-    let t = TestApp::new(DeliveryMode::Direct).await;
-    assert_eq!(t.get("GET", "/product/latest", &[]).await.status(), 404);
-    let r = t.create("1.0.0").await;
-    let win = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    let linux = t.upload(&r, "linux-x86_64", "app.AppImage").await;
-    t.publish(&r, "stable").await;
-    assert_eq!(t.get("GET", "/product/latest", &[]).await.status(), 409);
-    assert_eq!(
-        t.get("GET", "/product/latest?target=windows-x86_64", &[])
-            .await
-            .headers()["location"],
-        t.url(&r, &win, "stable")
-    );
-    assert_eq!(
-        t.get("GET", "/product/latest?format=appimage", &[])
-            .await
-            .headers()["location"],
-        t.url(&r, &linux, "stable")
-    );
-    assert_eq!(
-        t.get("GET", "/product/latest?target=darwin-aarch64", &[])
-            .await
-            .status(),
-        404
-    );
-    t.state
-        .applications
-        .set_distribution(
-            &t.actor,
-            &t.app,
-            Some(DistributionSelector {
-                target: win.target.clone(),
-                format: win.file_type.clone(),
-                purpose: "installer".into(),
-            }),
-        )
-        .await
-        .unwrap();
-    let latest = t.get("GET", "/product/latest", &[]).await;
-    assert_eq!(latest.status(), 307);
-    assert_eq!(latest.headers()["cache-control"], "no-store");
-    assert_eq!(latest.headers()["location"], t.url(&r, &win, "stable"));
-    assert_eq!(
-        t.get("GET", "/product/1.0.0/linux-x86_64", &[])
-            .await
-            .headers()["location"],
-        t.url(&r, &linux, "stable")
-    );
-    let beta = t.create("2.0.0-beta.1").await;
-    let b = t.upload(&beta, "windows-x86_64", "beta.exe").await;
-    t.publish(&beta, "beta").await;
-    assert_eq!(
-        t.get("GET", "/product/latest?channel=beta", &[])
-            .await
-            .headers()["location"],
-        t.url(&beta, &b, "beta")
-    );
-    assert_eq!(
-        t.get("GET", &t.url(&beta, &b, "stable"), &[])
-            .await
-            .status(),
-        404
-    );
-    assert_eq!(
-        t.get("GET", &t.url(&beta, &b, "beta"), &[]).await.status(),
-        200
-    );
-    let r2 = t.create("1.1.0").await;
-    let a2 = t.upload(&r2, "windows-x86_64", "new.exe").await;
-    t.publish(&r2, "stable").await;
-    assert_eq!(
-        t.get("GET", "/product/latest", &[]).await.headers()["location"],
-        t.url(&r2, &a2, "stable")
-    );
-    t.publish(&r, "stable").await;
-    assert_eq!(
-        t.get("GET", "/product/latest", &[]).await.headers()["location"],
-        t.url(&r, &win, "stable")
-    );
-    assert_eq!(
-        bytes(t.get("GET", &t.url(&r2, &a2, "stable"), &[]).await).await,
-        b"0123456789"
-    );
-}
-#[tokio::test]
 async fn explicit_format_required_and_updater_never_implicitly_selected() {
     let t = TestApp::new(DeliveryMode::Direct).await;
     let r = t.create("1.0.0").await;
@@ -639,19 +535,21 @@ async fn explicit_format_required_and_updater_never_implicitly_selected() {
         )
         .await
         .unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     assert_eq!(
-        t.get("GET", "/product/latest", &[]).await.headers()["location"],
-        t.url(&r, &m, "stable")
-    );
-    assert_eq!(
-        t.get("GET", "/product/latest?purpose=updater", &[])
+        t.get("GET", "/product/latest/windows-x86_64", &[])
             .await
             .headers()["location"],
-        t.url(&r, &a, "stable")
+        t.url(&r, &m)
     );
     assert_eq!(
-        t.get("GET", "/product/latest?format=exe", &[])
+        t.get("GET", "/product/1.0.0/windows-x86_64?purpose=updater", &[])
+            .await
+            .headers()["location"],
+        t.url(&r, &a)
+    );
+    assert_eq!(
+        t.get("GET", "/product/latest/windows-x86_64?format=exe", &[])
             .await
             .status(),
         404
@@ -659,7 +557,7 @@ async fn explicit_format_required_and_updater_never_implicitly_selected() {
     let r2 = t.create("1.1.0").await;
     t.upload(&r2, "windows-x86_64", "setup.exe").await;
     t.upload(&r2, "windows-x86_64", "setup.msi").await;
-    t.publish(&r2, "stable").await;
+    t.publish(&r2).await;
     assert_eq!(
         t.get("GET", "/product/1.1.0/windows-x86_64", &[])
             .await
@@ -678,8 +576,8 @@ async fn get_head_ranges_validators_unicode_and_cancellation() {
     let t = TestApp::new(DeliveryMode::Direct).await;
     let r = t.create("1.0.0").await;
     let a = t.upload(&r, "windows-x86_64", "Приложение \"1\".exe").await;
-    t.publish(&r, "stable").await;
-    let url = t.url(&r, &a, "stable");
+    t.publish(&r).await;
+    let url = t.url(&r, &a);
     let head = t.get("HEAD", &url, &[]).await;
     assert_eq!(head.status(), 200);
     assert_eq!(head.headers()["content-length"], "10");
@@ -775,23 +673,26 @@ async fn public_catalog_pagination_real_urls_and_all_privacy_boundaries() {
     let t = TestApp::new(DeliveryMode::Direct).await;
     let r = t.create("1.0.0").await;
     let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    let url = t.url(&r, &a, "stable");
+    let url = t.url(&r, &a);
     assert_eq!(t.get("GET", &url, &[]).await.status(), 404);
     let empty = json_body(
         t.get("GET", "/api/v1/public/applications/product", &[])
             .await,
     )
     .await;
-    assert!(empty["latest"].is_null());
-    t.publish(&r, "stable").await;
+    assert!(empty["latest_by_target"].as_object().unwrap().is_empty());
+    t.publish(&r).await;
     let catalog = json_body(
         t.get("GET", "/api/v1/public/applications/product", &[])
             .await,
     )
     .await;
-    assert_eq!(catalog["latest"]["version"], "1.0.0");
     assert_eq!(
-        catalog["latest"]["artifacts"][0]["download_url"],
+        catalog["latest_by_target"]["windows-x86_64"]["version"],
+        "1.0.0"
+    );
+    assert_eq!(
+        catalog["latest_by_target"]["windows-x86_64"]["artifacts"][0]["download_url"],
         format!("https://apps.example.test{url}")
     );
     let manifest = json_body(t.get("GET", "/product/manifest.json", &[]).await).await;
@@ -801,9 +702,9 @@ async fn public_catalog_pagination_real_urls_and_all_privacy_boundaries() {
     );
     assert!(!catalog.to_string().contains("storage_key"));
     assert!(!catalog.to_string().contains("created_at"));
-    let b = t.create("2.0.0-beta.1").await;
-    t.upload(&b, "linux-x86_64", "beta.AppImage").await;
-    t.publish(&b, "beta").await;
+    let b = t.create("2.0.0-rc.1").await;
+    t.upload(&b, "linux-x86_64", "prerelease.AppImage").await;
+    t.publish(&b).await;
     let history = json_body(
         t.get(
             "GET",
@@ -813,8 +714,8 @@ async fn public_catalog_pagination_real_urls_and_all_privacy_boundaries() {
         .await,
     )
     .await;
-    assert_eq!(history["total"], 1);
-    assert_eq!(history["items"], json!([]));
+    assert_eq!(history["total"], 2);
+    assert_eq!(history["items"][0]["version"], "1.0.0");
     assert_eq!(
         t.get(
             "GET",
@@ -828,7 +729,7 @@ async fn public_catalog_pagination_real_urls_and_all_privacy_boundaries() {
     assert_eq!(
         t.get(
             "GET",
-            "/api/v1/public/applications/product/releases?channel=no",
+            "/api/v1/public/applications/product/releases?unknown=no",
             &[]
         )
         .await
@@ -882,7 +783,7 @@ async fn public_catalog_pagination_real_urls_and_all_privacy_boundaries() {
             "/product/manifest.json",
             "/api/v1/public/applications/product",
             "/api/v1/public/applications/product/releases",
-            "/api/v1/updates/tauri/product/stable/windows/x86_64/0.0.0",
+            "/api/v1/updates/tauri/product/windows/x86_64/0.0.0",
         ] {
             assert_eq!(
                 t.get("GET", path, &[("if-none-match", "*")]).await.status(),
@@ -898,10 +799,10 @@ async fn missing_files_symlinks_traversal_and_internal_location_are_never_served
     let t = TestApp::new(DeliveryMode::Direct).await;
     let r = t.create("1.0.0").await;
     let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let path = t.config.storage.directory.join(&a.storage_key);
     tokio::fs::remove_file(&path).await.unwrap();
-    let response = t.get("GET", &t.url(&r, &a, "stable"), &[]).await;
+    let response = t.get("GET", &t.url(&r, &a), &[]).await;
     assert_eq!(response.status(), 503);
     assert!(
         !String::from_utf8(bytes(response).await)
@@ -913,10 +814,7 @@ async fn missing_files_symlinks_traversal_and_internal_location_are_never_served
         let secret = t.dir.path().join("outside");
         std::fs::write(&secret, b"0123456789").unwrap();
         std::os::unix::fs::symlink(secret, &path).unwrap();
-        assert_eq!(
-            t.get("HEAD", &t.url(&r, &a, "stable"), &[]).await.status(),
-            503
-        );
+        assert_eq!(t.get("HEAD", &t.url(&r, &a), &[]).await.status(), 503);
     }
     for path in [
         "/_veruna_files/abc.blob",
@@ -936,9 +834,9 @@ async fn nginx_delegation_is_authorized_and_head_is_complete_without_body() {
     let t = TestApp::new(DeliveryMode::Nginx).await;
     let r = t.create("1.0.0").await;
     let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let response = t
-        .get("GET", &t.url(&r, &a, "stable"), &[("range", "bytes=1-3")])
+        .get("GET", &t.url(&r, &a), &[("range", "bytes=1-3")])
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -946,12 +844,12 @@ async fn nginx_delegation_is_authorized_and_head_is_complete_without_body() {
         format!("/_veruna_files/{}", a.storage_key)
     );
     assert!(bytes(response).await.is_empty());
-    let head = t.get("HEAD", &t.url(&r, &a, "stable"), &[]).await;
+    let head = t.get("HEAD", &t.url(&r, &a), &[]).await;
     assert_eq!(head.headers()["content-length"], "10");
     assert!(!head.headers().contains_key("x-accel-redirect"));
     assert!(bytes(head).await.is_empty());
     let invalid = t
-        .get("GET", &t.url(&r, &a, "stable"), &[("range", "bytes=100-")])
+        .get("GET", &t.url(&r, &a), &[("range", "bytes=100-")])
         .await;
     assert_eq!(invalid.status(), 416);
     assert!(!invalid.headers().contains_key("x-accel-redirect"));
@@ -960,10 +858,7 @@ async fn nginx_delegation_is_authorized_and_head_is_complete_without_body() {
         .set_status(&t.actor, &t.app, Status::Archived)
         .await
         .unwrap();
-    assert_eq!(
-        t.get("GET", &t.url(&r, &a, "stable"), &[]).await.status(),
-        404
-    );
+    assert_eq!(t.get("GET", &t.url(&r, &a), &[]).await.status(), 404);
 }
 #[tokio::test]
 async fn macos_universal_download_and_updater_serve_both_architectures() {
@@ -984,10 +879,8 @@ async fn macos_universal_download_and_updater_serve_both_architectures() {
         )
         .await
         .unwrap();
-    t.publish(&r, "stable").await;
-    let latest = t
-        .get("GET", "/product/latest?target=darwin-universal", &[])
-        .await;
+    t.publish(&r).await;
+    let latest = t.get("GET", "/product/latest/darwin-universal", &[]).await;
     assert_eq!(latest.status(), 307);
     assert_eq!(
         latest.headers()["location"],
@@ -1000,7 +893,7 @@ async fn macos_universal_download_and_updater_serve_both_architectures() {
         let response = t
             .get(
                 "GET",
-                &format!("/api/v1/updates/tauri/product/stable/darwin/{arch}/1.0.0"),
+                &format!("/api/v1/updates/tauri/product/darwin/{arch}/1.0.0"),
                 &[],
             )
             .await;
@@ -1009,26 +902,26 @@ async fn macos_universal_download_and_updater_serve_both_architectures() {
         assert_eq!(data["signature"], sig);
         assert_eq!(
             data["url"],
-            format!("https://apps.example.test{}", t.url(&r, &updater, "stable"))
+            format!("https://apps.example.test{}", t.url(&r, &updater))
         );
         let preview = t
             .state
             .updater
-            .preview(&t.app, "stable", &format!("darwin-{arch}"), "1.0.0")
+            .preview(&t.app, &format!("darwin-{arch}"), "1.0.0")
             .await
             .unwrap();
         assert_eq!(preview.state, "available");
         assert_eq!(preview.artifact_id.as_deref(), Some(updater.id.as_str()));
     }
     assert_eq!(
-        bytes(t.get("GET", &t.url(&r, &updater, "stable"), &[]).await).await,
+        bytes(t.get("GET", &t.url(&r, &updater), &[]).await).await,
         b"0123456789"
     );
 }
 #[tokio::test]
-async fn tauri_http_updates_signatures_channels_and_no_downgrades() {
+async fn tauri_http_updates_signatures_and_no_downgrades() {
     let t = TestApp::new(DeliveryMode::Direct).await;
-    let endpoint = "/api/v1/updates/tauri/product/stable/windows/x86_64/1.0.0";
+    let endpoint = "/api/v1/updates/tauri/product/windows/x86_64/1.0.0";
     let empty = t.get("GET", endpoint, &[]).await;
     assert_eq!(empty.status(), 204);
     assert!(bytes(empty).await.is_empty());
@@ -1047,7 +940,7 @@ async fn tauri_http_updates_signatures_channels_and_no_downgrades() {
         )
         .await
         .unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let response = t.get("GET", endpoint, &[]).await;
     assert_eq!(response.status(), 200);
     let data = json_body(response).await;
@@ -1055,7 +948,7 @@ async fn tauri_http_updates_signatures_channels_and_no_downgrades() {
     assert_eq!(data["version"], "1.2.0");
     assert_eq!(
         data["url"],
-        format!("https://apps.example.test{}", t.url(&r, &a, "stable"))
+        format!("https://apps.example.test{}", t.url(&r, &a))
     );
     for current in ["1.2.0", "1.2.0+build", "1.9.0"] {
         let response = t
@@ -1081,32 +974,26 @@ async fn tauri_http_updates_signatures_channels_and_no_downgrades() {
             .status(),
         204
     );
-    let beta = t.create("1.3.0-beta.1").await;
-    let b = t.upload(&beta, "windows-x86_64", "beta.exe").await;
+    let prerelease = t.create("1.3.0-rc.1").await;
+    let b = t
+        .upload(&prerelease, "windows-x86_64", "prerelease.exe")
+        .await;
     t.state
         .artifacts
         .set_updater(
             &t.actor,
             &t.app,
-            &beta.id,
+            &prerelease.id,
             &b.id,
             Some("updater"),
             Some(Some(sig.as_bytes())),
         )
         .await
         .unwrap();
-    t.publish(&beta, "beta").await;
-    let beta_data = json_body(
-        t.get("GET", &endpoint.replace("/stable/", "/beta/"), &[])
-            .await,
-    )
-    .await;
-    assert_eq!(beta_data["version"], "1.3.0-beta.1");
-    assert!(
-        beta_data["url"]
-            .as_str()
-            .unwrap()
-            .ends_with("?channel=beta")
+    t.publish(&prerelease).await;
+    assert_eq!(
+        json_body(t.get("GET", endpoint, &[]).await).await["version"],
+        "1.2.0"
     );
     let unsigned = t.create("1.4.0").await;
     let u = t.upload(&unsigned, "windows-x86_64", "unsigned.exe").await;
@@ -1115,17 +1002,25 @@ async fn tauri_http_updates_signatures_channels_and_no_downgrades() {
         .set_updater(&t.actor, &t.app, &unsigned.id, &u.id, Some("updater"), None)
         .await
         .unwrap();
-    t.publish(&unsigned, "stable").await;
-    assert_eq!(t.get("GET", endpoint, &[]).await.status(), 503);
-    assert_eq!(t.get("GET", "/product/latest", &[]).await.status(), 404);
+    t.publish(&unsigned).await;
+    assert_eq!(
+        json_body(t.get("GET", endpoint, &[]).await).await["version"],
+        "1.2.0"
+    );
+    assert_eq!(
+        t.get("GET", "/product/latest/windows-x86_64", &[])
+            .await
+            .status(),
+        404
+    );
     let preview = t
         .state
         .updater
-        .preview(&t.app, "stable", "windows-x86_64", "1.0.0")
+        .preview(&t.app, "windows-x86_64", "1.0.0")
         .await
         .unwrap();
-    assert_eq!(preview.reason, "signature_missing");
-    t.publish(&r, "stable").await;
+    assert_eq!(preview.selected_version.as_deref(), Some("1.2.0"));
+    t.publish(&r).await;
     assert_eq!(
         t.get("GET", &endpoint.replace("/1.0.0", "/1.4.0"), &[])
             .await
@@ -1133,117 +1028,7 @@ async fn tauri_http_updates_signatures_channels_and_no_downgrades() {
         204
     );
 }
-#[tokio::test]
-async fn default_mutation_requires_admin_csrf_and_live_session_and_warns_on_publish() {
-    let t = TestApp::new(DeliveryMode::Direct).await;
-    let url = format!("/api/v1/admin/applications/{}/distribution/default", t.app);
-    let body = json!({"target":"windows-x86_64","format":"exe","purpose":"installer"});
-    assert_eq!(
-        t.admin("PUT", &url, body.clone(), None, false)
-            .await
-            .status(),
-        401
-    );
-    assert_eq!(
-        t.admin("PUT", &url, body.clone(), Some(&t.token), false)
-            .await
-            .status(),
-        403
-    );
-    let (operator_user, _) = t
-        .state
-        .users
-        .create(
-            &t.actor,
-            "operator",
-            Role::Operator,
-            Some("test-password-456".into()),
-        )
-        .await
-        .unwrap();
-    let operator = t
-        .state
-        .authentication
-        .login("operator", "test-password-456".into(), None)
-        .await
-        .unwrap();
-    assert_eq!(
-        t.admin("PUT", &url, body.clone(), Some(&operator.token), true)
-            .await
-            .status(),
-        403
-    );
-    let settings = format!("/api/v1/admin/applications/{}/distribution", t.app);
-    assert_eq!(t.get("GET", &settings, &[]).await.status(), 401);
-    assert_eq!(
-        t.admin("GET", &settings, Value::Null, Some(&operator.token), false)
-            .await
-            .status(),
-        200
-    );
-    assert_eq!(
-        t.admin("PUT", &url, body, Some(&t.token), true)
-            .await
-            .status(),
-        204
-    );
-    let r = t.create("1.0.0").await;
-    t.upload(&r, "linux-x86_64", "app.AppImage").await;
-    let validation = t
-        .state
-        .publishing
-        .validate(&t.actor, &t.app, &r.id, "stable")
-        .await
-        .unwrap();
-    assert!(
-        validation
-            .validation
-            .warnings
-            .iter()
-            .any(|i| i.code == "default_distribution_missing")
-    );
-    assert_eq!(
-        t.admin(
-            "PUT",
-            &url,
-            json!({"target":"windows-x86_64","format":"exe","purpose":"updater"}),
-            Some(&t.token),
-            true
-        )
-        .await
-        .status(),
-        422
-    );
-    assert_eq!(
-        t.admin("PUT", &url, Value::Null, Some(&t.token), true)
-            .await
-            .status(),
-        204
-    );
-    t.state
-        .users
-        .revoke(&t.actor, &operator_user.id)
-        .await
-        .unwrap();
-    assert_eq!(
-        t.admin("PUT", &url, Value::Null, Some(&operator.token), true)
-            .await
-            .status(),
-        401
-    );
-    t.state
-        .users
-        .revoke(&t.actor, &t.actor.user.id)
-        .await
-        .unwrap();
-    assert!(matches!(
-        t.state
-            .applications
-            .set_distribution(&t.actor, &t.app, None)
-            .await,
-        Err(veruna_releases::services::error::ServiceError::Unauthorized)
-    ));
-}
+
 #[tokio::test]
 async fn sparse_file_over_two_gib_streams_and_reports_u64_metadata() {
     let t = TestApp::new(DeliveryMode::Direct).await;
@@ -1257,16 +1042,13 @@ async fn sparse_file_over_two_gib_streams_and_reports_u64_metadata() {
     // Fixture bypasses publication hashing; this sparse object is never a real release.
     sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at) VALUES(?,?,'large.bin','any','bin',?,?,?,?)").bind(&id).bind(&r.id).bind(length as i64).bind("0".repeat(64)).bind(&key).bind(r.created_at).execute(&t.state.database).await.unwrap();
     let mut tx = t.state.database.begin().await.unwrap();
-    use veruna_releases::repositories::channel::ChannelsRepository;
-    ChannelsRepository::publish(&mut tx, &r.id, secrets::now())
-        .await
-        .unwrap();
-    let channel = ChannelsRepository::get_in(&mut tx, &t.app, "stable")
-        .await
-        .unwrap();
-    ChannelsRepository::assign(&mut tx, &channel, &r.id, secrets::now())
-        .await
-        .unwrap();
+    veruna_releases::repositories::release::ReleasesRepository::publish(
+        &mut tx,
+        &r.id,
+        secrets::now(),
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     let url = format!("/product/releases/1.0.0/artifacts/{id}/download");
     let head = t.get("HEAD", &url, &[]).await;
@@ -1305,17 +1087,19 @@ fn public_key() -> String {
 #[test]
 fn tauri_configuration_preserves_tokens_and_serializes_values_safely() {
     use veruna_releases::services::tauri_integration::{configuration, endpoint};
-    let stable = endpoint("https://updates.example.test/", "product-one", "stable").unwrap();
+    let generated = endpoint("https://updates.example.test/", "product-one").unwrap();
     assert_eq!(
-        stable,
-        "https://updates.example.test/api/v1/updates/tauri/product-one/stable/{{target}}/{{arch}}/{{current_version}}"
+        generated,
+        "https://updates.example.test/api/v1/updates/tauri/product-one/{{target}}/{{arch}}/{{current_version}}"
     );
-    let beta = endpoint("https://another.example.test", "second-app", "beta").unwrap();
-    assert!(beta.starts_with("https://another.example.test/api/v1/updates/tauri/second-app/beta/"));
+    let prerelease = endpoint("https://another.example.test", "second-app").unwrap();
+    assert!(
+        prerelease.starts_with("https://another.example.test/api/v1/updates/tauri/second-app/")
+    );
     let key = "quoted\"key\nwith\\escapes";
-    let value: Value = serde_json::from_str(&configuration(key, &stable).to_string()).unwrap();
+    let value: Value = serde_json::from_str(&configuration(key, &generated).to_string()).unwrap();
     assert_eq!(value["plugins"]["updater"]["pubkey"], key);
-    assert_eq!(value["plugins"]["updater"]["endpoints"][0], stable);
+    assert_eq!(value["plugins"]["updater"]["endpoints"][0], generated);
     assert_eq!(value["bundle"]["createUpdaterArtifacts"], true);
     for base in [
         "https://evil.test/path",
@@ -1323,10 +1107,9 @@ fn tauri_configuration_preserves_tokens_and_serializes_values_safely() {
         "https://example.test?x=1",
         "file:///tmp",
     ] {
-        assert!(endpoint(base, "product", "stable").is_err());
+        assert!(endpoint(base, "product").is_err());
     }
-    assert!(endpoint("https://example.test", "../bad", "stable").is_err());
-    assert!(endpoint("https://example.test", "product", "nightly").is_err());
+    assert!(endpoint("https://example.test", "../bad").is_err());
 }
 #[tokio::test]
 async fn tauri_settings_key_persistence_validation_access_and_revoked_session() {
@@ -1353,11 +1136,7 @@ async fn tauri_settings_key_persistence_validation_access_and_revoked_session() 
         .iter()
         .map(|i| i["code"].as_str().unwrap())
         .collect();
-    for code in [
-        "public_key_missing",
-        "published_release_missing",
-        "channel_release_missing",
-    ] {
+    for code in ["public_key_missing", "published_release_missing"] {
         assert!(codes.contains(&code));
     }
     t.state
@@ -1453,13 +1232,13 @@ async fn tauri_settings_key_persistence_validation_access_and_revoked_session() 
         .unwrap();
     let d = restarted
         .tauri_integration
-        .details(&t.app, "beta", false)
+        .details(&t.app, false)
         .await
         .unwrap();
     assert_eq!(d.public_key.as_deref(), Some(key.as_str()));
     assert!(
         d.endpoint
-            .contains("https://apps.example.test/api/v1/updates/tauri/product/beta/{{target}}")
+            .contains("https://apps.example.test/api/v1/updates/tauri/product/{{target}}")
     );
     assert_eq!(
         d.configuration.unwrap()["plugins"]["updater"]["pubkey"],
@@ -1468,7 +1247,7 @@ async fn tauri_settings_key_persistence_validation_access_and_revoked_session() 
     assert_eq!(
         t.admin(
             "GET",
-            &format!("{path}?channel=bad"),
+            &format!("{path}?unknown=bad"),
             Value::Null,
             Some(&t.token),
             false
@@ -1492,7 +1271,7 @@ async fn tauri_settings_key_persistence_validation_access_and_revoked_session() 
     assert!(
         t.state
             .tauri_integration
-            .details(&t.app, "stable", false)
+            .details(&t.app, false)
             .await
             .unwrap()
             .public_key
@@ -1520,7 +1299,7 @@ async fn tauri_settings_key_persistence_validation_access_and_revoked_session() 
     );
 }
 #[tokio::test]
-async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
+async fn tauri_integration_reuses_readiness_and_preview_protocol() {
     let t = TestApp::new(DeliveryMode::Direct).await;
     t.state
         .applications
@@ -1534,19 +1313,23 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
         .set_updater(&t.actor, &t.app, &r.id, &a.id, Some("updater"), None)
         .await
         .unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     let d = t
         .state
         .tauri_integration
-        .details(&t.app, "stable", false)
+        .details(&t.app, false)
         .await
         .unwrap();
-    assert!(d.blockers.iter().any(|i| i.code == "signature_missing"));
-    assert!(!d.packages[0].signature_present);
+    assert!(
+        d.blockers
+            .iter()
+            .any(|i| i.code == "signed_updater_missing")
+    );
+    assert!(d.packages.is_empty());
     let preview = t
         .state
         .updater
-        .preview(&t.app, "stable", "windows-x86_64", "1.0.0")
+        .preview(&t.app, "windows-x86_64", "1.0.0")
         .await
         .unwrap();
     assert_eq!(preview.reason, "signature_missing");
@@ -1566,12 +1349,12 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
         )
         .await
         .unwrap();
-    t.publish(&signed, "beta").await;
+    t.publish(&signed).await;
     let path = format!("/api/v1/admin/applications/{}/integrations/tauri", t.app);
     let details = json_body(
         t.admin(
             "POST",
-            &format!("{path}/readiness?channel=beta"),
+            &format!("{path}/readiness"),
             Value::Null,
             Some(&t.token),
             true,
@@ -1581,14 +1364,14 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
     .await;
     assert_eq!(details["ready"], true);
     assert_eq!(details["full_integrity_checked"], true);
-    assert_eq!(details["current_version"], "1.0.2");
+    assert_eq!(details["packages"][0]["version"], "1.0.2");
     assert_eq!(details["packages"][0]["signature_present"], true);
     let preview_path = format!("/api/v1/admin/applications/{}/updater/tauri/preview", t.app);
     let available = json_body(
         t.admin(
             "POST",
             &preview_path,
-            json!({"channel":"beta","target":"windows-x86_64","current_version":"1.0.0"}),
+            json!({"target":"windows-x86_64","current_version":"1.0.0"}),
             Some(&t.token),
             true,
         )
@@ -1600,7 +1383,7 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
     let actual = json_body(
         t.get(
             "GET",
-            "/api/v1/updates/tauri/product/beta/windows/x86_64/1.0.0",
+            "/api/v1/updates/tauri/product/windows/x86_64/1.0.0",
             &[],
         )
         .await,
@@ -1611,7 +1394,7 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
         t.admin(
             "POST",
             &preview_path,
-            json!({"channel":"beta","target":"windows-x86_64","current_version":"1.0.2"}),
+            json!({"target":"windows-x86_64","current_version":"1.0.2"}),
             Some(&t.token),
             true,
         )
@@ -1623,7 +1406,7 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
     let public = t
         .get(
             "GET",
-            "/api/v1/updates/tauri/product/beta/windows/x86_64/1.0.2",
+            "/api/v1/updates/tauri/product/windows/x86_64/1.0.2",
             &[],
         )
         .await;
@@ -1632,24 +1415,27 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
     let absent = t
         .state
         .updater
-        .preview(&t.app, "beta", "linux-aarch64", "1.0.0")
+        .preview(&t.app, "linux-aarch64", "1.0.0")
         .await
         .unwrap();
     assert_eq!(absent.reason, "updater_package_missing");
     assert!(
         t.state
             .updater
-            .preview(&t.app, "beta", "android-aarch64", "1.0.0")
+            .preview(&t.app, "android-aarch64", "1.0.0")
             .await
             .is_err()
     );
-    let stable = t
+    let integration = t
         .state
         .tauri_integration
-        .details(&t.app, "stable", false)
+        .details(&t.app, false)
         .await
         .unwrap();
-    assert_eq!(stable.current_version.as_deref(), Some("1.0.1"));
+    assert_eq!(
+        integration.packages.first().map(|p| p.version.as_str()),
+        Some("1.0.2")
+    );
     tokio::fs::write(
         t.config.storage.directory.join(&signed_file.storage_key),
         b"XXXXXXXXXX",
@@ -1659,7 +1445,7 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
     let full = t
         .state
         .tauri_integration
-        .details(&t.app, "beta", true)
+        .details(&t.app, true)
         .await
         .unwrap();
     assert!(full.blockers.iter().any(|i| i.code == "checksum_mismatch"));
@@ -1678,7 +1464,7 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
     assert!(
         t.state
             .tauri_integration
-            .details(&t.app, "beta", false)
+            .details(&t.app, false)
             .await
             .unwrap()
             .blockers
@@ -1687,41 +1473,23 @@ async fn tauri_integration_reuses_channel_readiness_and_preview_protocol() {
     );
 }
 #[tokio::test]
-async fn tauri_readiness_distinguishes_published_release_empty_channel_and_installer_only() {
+async fn tauri_readiness_distinguishes_published_release_and_installer_only() {
     let t = TestApp::new(DeliveryMode::Direct).await;
     let r = t.create("1.0.1").await;
     t.upload(&r, "windows-x86_64", "setup.exe").await;
-    t.publish(&r, "stable").await;
-    let stable = t
+    t.publish(&r).await;
+    let integration = t
         .state
         .tauri_integration
-        .details(&t.app, "stable", false)
+        .details(&t.app, false)
         .await
         .unwrap();
-    assert!(stable.published_release_exists);
+    assert!(integration.published_release_exists);
     assert!(
-        stable
+        integration
             .blockers
             .iter()
-            .any(|i| i.code == "updater_package_missing")
-    );
-    let beta = t
-        .state
-        .tauri_integration
-        .details(&t.app, "beta", false)
-        .await
-        .unwrap();
-    assert!(beta.published_release_exists);
-    assert!(
-        beta.blockers
-            .iter()
-            .any(|i| i.code == "channel_release_missing")
-    );
-    assert!(
-        !beta
-            .blockers
-            .iter()
-            .any(|i| i.code == "published_release_missing")
+            .any(|i| i.code == "signed_updater_missing")
     );
     let path = format!("/api/v1/admin/applications/{}/integrations/tauri", t.app);
     let cookie = format!("veruna_session={}", t.token);
@@ -1816,7 +1584,7 @@ async fn automatic_domain_is_used_in_manifests_tauri_and_integration_without_sha
         )
         .await
         .unwrap();
-    t.publish(&r, "stable").await;
+    t.publish(&r).await;
     t.state.auth_config.public_origin.clear();
     t.state.distribution.config.public_base_url.clear();
     t.router = http::router(t.state.clone());
@@ -1824,7 +1592,7 @@ async fn automatic_domain_is_used_in_manifests_tauri_and_integration_without_sha
         let origin = format!("https://{host}");
         for path in [
             "/product/manifest.json".to_owned(),
-            "/api/v1/updates/tauri/product/stable/windows/x86_64/0.1.0".to_owned(),
+            "/api/v1/updates/tauri/product/windows/x86_64/0.1.0".to_owned(),
             format!("/api/v1/admin/applications/{}/integrations/tauri", t.app),
         ] {
             let response = t
@@ -1850,10 +1618,10 @@ async fn automatic_domain_is_used_in_manifests_tauri_and_integration_without_sha
             if path.ends_with("manifest.json") {
                 assert_eq!(
                     value["releases"][0]["artifacts"][0]["download_url"],
-                    format!("{origin}{}", t.url(&r, &a, "stable"))
+                    format!("{origin}{}", t.url(&r, &a))
                 );
             } else if path.contains("/updates/tauri/") {
-                assert_eq!(value["url"], format!("{origin}{}", t.url(&r, &a, "stable")));
+                assert_eq!(value["url"], format!("{origin}{}", t.url(&r, &a)));
             } else {
                 assert_eq!(value["public_base_url"], origin);
                 assert!(
@@ -1866,4 +1634,145 @@ async fn automatic_domain_is_used_in_manifests_tauri_and_integration_without_sha
         }
     }
     assert!(t.state.distribution.config.public_base_url.is_empty());
+}
+
+#[tokio::test]
+async fn latest_installers_are_independent_per_target_and_format_with_semver_and_draft_exclusion() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let empty = json_body(t.get("GET", "/product/manifest.json", &[]).await).await;
+    assert_eq!(empty["schema_version"], 2);
+    assert_eq!(empty["releases"], json!([]));
+    assert_eq!(empty["latest_by_target"], json!({}));
+    let page = t.get("GET", "/product/latest", &[]).await;
+    assert_eq!(page.status(), 307);
+    assert_eq!(page.headers()["location"], "/product");
+    assert_eq!(page.headers()["cache-control"], "no-store");
+    let r5 = t.create("0.5.0").await;
+    let mac5 = t.upload(&r5, "darwin-aarch64", "product.dmg").await;
+    t.publish(&r5).await;
+    let original = t.state.releases.get(&t.app, &r5.id).await.unwrap();
+    let win5 = t.upload(&r5, "windows-x86_64", "product.exe").await;
+    let appended = t.state.releases.get(&t.app, &r5.id).await.unwrap();
+    assert_eq!(original.published_at, appended.published_at);
+    assert_eq!(appended.revision, original.revision + 1);
+    let r6 = t.create("0.6.0").await;
+    let mac6 = t.upload(&r6, "darwin-aarch64", "new.dmg").await;
+    t.publish(&r6).await;
+    let draft = t.create("9.0.0").await;
+    t.upload(&draft, "windows-x86_64", "draft.exe").await;
+    let pre = t.create("10.0.0-rc.1").await;
+    let pre_file = t.upload(&pre, "windows-x86_64", "preview.exe").await;
+    t.publish(&pre).await;
+    for (target, r, file) in [
+        ("windows-x86_64", &r5, &win5),
+        ("darwin-aarch64", &r6, &mac6),
+    ] {
+        for method in ["GET", "HEAD"] {
+            let latest = t
+                .get(method, &format!("/product/latest/{target}"), &[])
+                .await;
+            assert_eq!(latest.status(), 307);
+            assert_eq!(latest.headers()["location"], t.url(r, file));
+        }
+    }
+    let manifest = json_body(t.get("GET", "/product/manifest.json?limit=1", &[]).await).await;
+    assert_eq!(
+        manifest["latest_by_target"]["windows-x86_64"]["version"],
+        "0.5.0"
+    );
+    assert_eq!(
+        manifest["latest_by_target"]["darwin-aarch64"]["version"],
+        "0.6.0"
+    );
+    assert_eq!(manifest["releases"].as_array().unwrap().len(), 1);
+    assert!(manifest.get("latest").is_none());
+    // New formats can be appended to the same published platform.
+    let msi5 = t.upload(&r5, "windows-x86_64", "product.msi").await;
+    let ambiguous = t.get("GET", "/product/latest/windows-x86_64", &[]).await;
+    assert_eq!(ambiguous.status(), 409);
+    assert_eq!(
+        json_body(ambiguous).await["error"]["code"],
+        "ambiguous_artifact"
+    );
+    for (format, file) in [("exe", &win5), ("msi", &msi5)] {
+        assert_eq!(
+            t.get(
+                "GET",
+                &format!("/product/latest/windows-x86_64?format={format}"),
+                &[]
+            )
+            .await
+            .headers()["location"],
+            t.url(&r5, file)
+        );
+    }
+    // SemVer 0.10.0 > 0.6.0, while the older MSI remains available by format.
+    let r10 = t.create("0.10.0+build.1").await;
+    let win10 = t.upload(&r10, "windows-x86_64", "next.exe").await;
+    t.publish(&r10).await;
+    assert_eq!(
+        t.get("GET", "/product/latest/windows-x86_64", &[])
+            .await
+            .headers()["location"],
+        t.url(&r10, &win10)
+    );
+    assert_eq!(
+        t.get("GET", "/product/latest/windows-x86_64?format=msi", &[])
+            .await
+            .headers()["location"],
+        t.url(&r5, &msi5)
+    );
+    for (r, file) in [(&r5, &win5), (&r5, &mac5), (&r5, &msi5), (&pre, &pre_file)] {
+        assert_eq!(t.get("GET", &t.url(r, file), &[]).await.status(), 200);
+    }
+    assert_eq!(
+        t.get("GET", "/product/9.0.0/windows-x86_64", &[])
+            .await
+            .status(),
+        404
+    );
+}
+
+#[tokio::test]
+async fn updater_finds_older_signed_package_when_newer_release_has_only_another_platform() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let win = t.create("0.5.0").await;
+    let artifact = t.upload(&win, "windows-x86_64", "update.exe").await;
+    t.state
+        .artifacts
+        .set_updater(
+            &t.actor,
+            &t.app,
+            &win.id,
+            &artifact.id,
+            Some("updater"),
+            Some(Some(signature().as_bytes())),
+        )
+        .await
+        .unwrap();
+    t.publish(&win).await;
+    let mac = t.create("0.6.0").await;
+    t.upload(&mac, "darwin-aarch64", "product.dmg").await;
+    t.publish(&mac).await;
+    let response = json_body(
+        t.get(
+            "GET",
+            "/api/v1/updates/tauri/product/windows/x86_64/0.4.0",
+            &[],
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(response["version"], "0.5.0");
+    assert!(response["url"].as_str().unwrap().contains(&artifact.id));
+    assert_eq!(
+        t.get(
+            "GET",
+            "/api/v1/updates/tauri/product/windows/x86_64/0.5.0",
+            &[]
+        )
+        .await
+        .status(),
+        204
+    );
 }
