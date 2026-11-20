@@ -1,4 +1,5 @@
 //! Bounded image processing and a separate capability-scoped icon directory.
+use super::directory::sync_directory;
 use crate::services::error::{Result, ServiceError};
 use cap_std::{
     ambient_authority,
@@ -107,7 +108,7 @@ impl IconStorage {
             file.sync_all()?;
             drop(file);
             root.rename(&temporary, &root, &key)?;
-            root.into_std_file().sync_all()?;
+            sync_directory(&root)?;
             Ok(key)
         })
         .await

@@ -1,4 +1,5 @@
 //! Local, capability-scoped artifact I/O. No user filename is ever a disk path.
+use super::directory::sync_directory;
 use crate::{
     config::StorageConfig,
     services::error::{Result, ServiceError},
@@ -176,8 +177,8 @@ impl ArtifactStorage for LocalArtifactStorage {
                     root.remove_file(key)?;
                 }
             }
-            root.into_std_file().sync_all()?;
-            temp.into_std_file().sync_all()?;
+            sync_directory(&root)?;
+            sync_directory(&temp)?;
             Ok(())
         })
         .await
@@ -251,8 +252,8 @@ impl ArtifactStorage for LocalArtifactStorage {
                 permanent_key: Some(key),
             };
             temp.remove_file(from)?;
-            root.try_clone()?.into_std_file().sync_all()?;
-            temp.try_clone()?.into_std_file().sync_all()?;
+            sync_directory(&root)?;
+            sync_directory(&temp)?;
             Ok(guard)
         })
         .await?;
@@ -287,7 +288,7 @@ impl ArtifactStorage for LocalArtifactStorage {
         blocking(move || {
             let root = Dir::open_ambient_dir(directory, ambient_authority())?;
             match root.remove_file(key) {
-                Ok(()) => root.into_std_file().sync_all()?,
+                Ok(()) => sync_directory(&root)?,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => (),
                 Err(e) => return Err(e.into()),
             }
