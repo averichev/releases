@@ -10,6 +10,7 @@ mod health;
 mod origin;
 mod publication;
 mod releases;
+mod standalone;
 mod tauri_integration;
 mod upload_body;
 
@@ -40,6 +41,7 @@ pub struct AppState {
     pub manifests: crate::services::manifest::ManifestGeneration,
     pub tauri_integration: crate::services::tauri_integration::TauriIntegration,
     pub updater: crate::services::updater::TauriUpdater,
+    pub standalone_updater: crate::services::standalone::StandaloneUpdater,
     pub storage_config: crate::config::StorageConfig,
     pub releases: crate::services::release::ReleaseManagement,
     pub artifacts: crate::services::artifact::ArtifactManagement,
@@ -60,7 +62,9 @@ pub fn router(state: AppState) -> Router {
     let public_distribution = Router::new()
         .nest(
             "/api/v1",
-            distribution::api_router().layer(api_cache.clone()),
+            distribution::api_router()
+                .merge(standalone::api_router())
+                .layer(api_cache.clone()),
         )
         .route("/{slug}/manifest.json", get(publication::public_manifest))
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })

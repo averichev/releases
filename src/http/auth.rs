@@ -276,6 +276,9 @@ async fn activate(
 impl From<ServiceError> for ApiError {
     fn from(error: ServiceError) -> Self {
         match error {
+            ServiceError::InvalidStandalone => Self::InvalidStandalone,
+            ServiceError::StandaloneKeyConflict => Self::StandaloneKeyConflict,
+            ServiceError::StandaloneUnavailable => Self::StandaloneUnavailable,
             ServiceError::Invalid => Self::BadRequest,
             ServiceError::Credentials => Self::Credentials,
             ServiceError::Unauthorized => Self::Unauthorized,

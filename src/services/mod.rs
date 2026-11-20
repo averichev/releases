@@ -20,4 +20,5 @@ pub mod updater;
 
 pub mod distribution;
 
+pub mod standalone;
 pub mod tauri_integration;

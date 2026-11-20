@@ -7,4 +7,5 @@ pub mod release;
 
 pub mod publication;
 
+pub mod standalone;
 pub mod tauri;

@@ -10,6 +10,7 @@ pub struct Application {
     pub status: Status,
     pub created_at: i64,
     pub updated_at: i64,
+    pub standalone_public_key: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

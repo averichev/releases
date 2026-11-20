@@ -26,6 +26,7 @@ pub struct Artifact {
     pub created_at: i64,
     pub distribution_role: String,
     pub updater_signature: Option<String>,
+    pub standalone_signature: Option<String>,
 }
 pub struct UploadMetadata {
     pub filename: String,

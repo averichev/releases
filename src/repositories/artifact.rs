@@ -16,6 +16,7 @@ struct StoredArtifact {
     created_at: i64,
     distribution_role: String,
     updater_signature: Option<String>,
+    standalone_signature: Option<String>,
 }
 impl From<StoredArtifact> for Artifact {
     fn from(v: StoredArtifact) -> Self {
@@ -31,6 +32,7 @@ impl From<StoredArtifact> for Artifact {
             created_at: v.created_at,
             distribution_role: v.distribution_role,
             updater_signature: v.updater_signature,
+            standalone_signature: v.standalone_signature,
         }
     }
 }
@@ -93,8 +95,8 @@ impl ArtifactsRepository {
         Ok(())
     }
     pub async fn insert(c: &mut SqliteConnection, a: &Artifact) -> Result<()> {
-        let result=sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-            .bind(&a.id).bind(&a.release_id).bind(&a.filename).bind(&a.target).bind(&a.file_type).bind(a.size_bytes).bind(&a.sha256).bind(&a.storage_key).bind(a.created_at).bind(&a.distribution_role).bind(&a.updater_signature).execute(c).await;
+        let result=sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature,standalone_signature) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+            .bind(&a.id).bind(&a.release_id).bind(&a.filename).bind(&a.target).bind(&a.file_type).bind(a.size_bytes).bind(&a.sha256).bind(&a.storage_key).bind(a.created_at).bind(&a.distribution_role).bind(&a.updater_signature).bind(&a.standalone_signature).execute(c).await;
         match result {
             Err(sqlx::Error::Database(ref e)) if e.is_unique_violation() => {
                 return Err(ServiceError::ArtifactConflict);
@@ -135,5 +137,25 @@ impl ArtifactsRepository {
             .execute(c)
             .await?;
         Ok(())
+    }
+    pub async fn standalone(
+        c: &mut SqliteConnection,
+        id: &str,
+        signature: Option<&str>,
+    ) -> Result<()> {
+        let result = sqlx::query("UPDATE artifacts SET standalone_signature=? WHERE id=?")
+            .bind(signature)
+            .bind(id)
+            .execute(c)
+            .await;
+        match result {
+            Err(sqlx::Error::Database(ref e)) if e.is_unique_violation() => {
+                Err(ServiceError::ArtifactConflict)
+            }
+            other => {
+                other?;
+                Ok(())
+            }
+        }
     }
 }

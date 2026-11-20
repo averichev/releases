@@ -54,6 +54,7 @@ pub(super) struct ArtifactDto {
     created_at: i64,
     distribution_role: String,
     signature_present: bool,
+    standalone_signature_present: bool,
 }
 impl From<Artifact> for ArtifactDto {
     fn from(a: Artifact) -> Self {
@@ -68,6 +69,7 @@ impl From<Artifact> for ArtifactDto {
             created_at: a.created_at,
             distribution_role: a.distribution_role,
             signature_present: a.updater_signature.is_some(),
+            standalone_signature_present: a.standalone_signature.is_some(),
         }
     }
 }
@@ -139,6 +141,7 @@ async fn upload(
     let mut upload = None;
     let mut role = None;
     let mut signature = None;
+    let mut standalone_signature = None;
     while let Some(mut field) = timeout(idle, multipart.next_field())
         .await
         .map_err(|_| ApiError::UploadTimeout)?
@@ -162,12 +165,20 @@ async fn upload(
             {
                 role = Some(text(&mut field, idle).await?);
             }
-            Some("signature") if signature.is_none() => {
-                if !field
-                    .file_name()
-                    .is_some_and(|name| name.to_ascii_lowercase().ends_with(".sig"))
-                {
-                    return Err(ApiError::InvalidUpdater);
+            Some(name @ ("signature" | "standalone_signature"))
+                if (name == "signature" && signature.is_none())
+                    || (name == "standalone_signature" && standalone_signature.is_none()) =>
+            {
+                let standalone = name == "standalone_signature";
+                if !field.file_name().is_some_and(|name| {
+                    name.to_ascii_lowercase()
+                        .ends_with(if standalone { ".jws" } else { ".sig" })
+                }) {
+                    return Err(if standalone {
+                        ApiError::InvalidStandalone
+                    } else {
+                        ApiError::InvalidUpdater
+                    });
                 }
                 budget.file(state.storage_config.max_request_bytes);
                 let mut bytes = Vec::new();
@@ -176,12 +187,21 @@ async fn upload(
                     .map_err(|_| ApiError::UploadTimeout)?
                     .map_err(multipart_error)?
                 {
-                    if bytes.len() + chunk.len() > crate::services::updater::MAX_SIGNATURE_BYTES {
+                    let max = if standalone {
+                        crate::domain::standalone::MAX_SIGNATURE_BYTES
+                    } else {
+                        crate::services::updater::MAX_SIGNATURE_BYTES
+                    };
+                    if bytes.len() + chunk.len() > max {
                         return Err(ApiError::PayloadTooLarge);
                     }
                     bytes.extend_from_slice(&chunk);
                 }
-                signature = Some(bytes);
+                if standalone {
+                    standalone_signature = Some(bytes);
+                } else {
+                    signature = Some(bytes);
+                }
             }
             Some("file") if upload.is_none() => {
                 let filename = field
@@ -219,6 +239,9 @@ async fn upload(
     let mut upload = upload.ok_or(ApiError::InvalidArtifact)?;
     if let Some(bytes) = signature {
         upload.set_signature(&bytes)?;
+    }
+    if let Some(bytes) = standalone_signature {
+        upload.set_standalone_signature(&bytes)?;
     }
     let result = state.artifacts.complete(&actor, upload).await?;
     Ok((StatusCode::CREATED, Json(result.into())))

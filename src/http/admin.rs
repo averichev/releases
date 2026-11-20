@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(super::publication::router())
         .merge(super::distribution::admin_router())
         .merge(super::tauri_integration::router())
+        .merge(super::standalone::admin_router())
         .merge(super::artifacts::router(&state))
         .layer(middleware::from_fn(auth::require_session))
 }

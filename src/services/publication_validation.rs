@@ -125,6 +125,27 @@ impl PublicationValidator {
                     warnings.push(issue("signature_missing",format!("Отсутствует подпись Tauri Updater для {}. Этот файл будет недоступен в updater.",artifact.target)));
                 }
             }
+            if let Some(signature) = &artifact.standalone_signature
+                && snapshot
+                    .application
+                    .standalone_public_key
+                    .as_deref()
+                    .and_then(|key| {
+                        crate::domain::standalone::verify(
+                            signature,
+                            key,
+                            &snapshot.application.id,
+                            &snapshot.release,
+                            artifact,
+                        )
+                    })
+                    .is_none()
+            {
+                errors.push(issue(
+                    "standalone_invalid",
+                    "Подпись standalone или связанные метаданные не прошли проверку.".into(),
+                ));
+            }
         }
         Ok(PublicationValidation::new(warnings, errors))
     }

@@ -15,6 +15,7 @@ struct StoredApplication {
     status: String,
     created_at: i64,
     updated_at: i64,
+    standalone_public_key: Option<String>,
 }
 impl StoredApplication {
     fn application(self) -> Result<Application> {
@@ -32,6 +33,7 @@ impl StoredApplication {
             })?,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            standalone_public_key: self.standalone_public_key,
         })
     }
 }
@@ -146,6 +148,26 @@ impl ApplicationsRepository {
                 .fetch_all(&self.pool)
                 .await?,
         )
+    }
+    pub async fn set_standalone_key(
+        c: &mut SqliteConnection,
+        id: &str,
+        key: Option<&str>,
+        now: i64,
+    ) -> Result<()> {
+        let result = sqlx::query("UPDATE applications SET standalone_public_key=?,updated_at=max(updated_at,?) WHERE id=?")
+            .bind(key).bind(now).bind(id).execute(c).await;
+        match result {
+            Err(sqlx::Error::Database(ref e))
+                if e.is_unique_violation() || e.message() == "standalone_key_locked" =>
+            {
+                Err(ServiceError::StandaloneKeyConflict)
+            }
+            other => {
+                other?;
+                Ok(())
+            }
+        }
     }
 }
 fn filtered<'a>(select: &'static str, query: &'a ListQuery) -> QueryBuilder<'a, Sqlite> {

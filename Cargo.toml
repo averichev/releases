@@ -20,6 +20,8 @@ rpassword = "7"
 zeroize = "1"
 axum = { version = "0.8.9", features = ["multipart"] }
 semver = "1"
+jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto"] }
+ed25519-dalek = { version = "3", default-features = false }
 cap-fs-ext = "3"
 tokio-util = { version = "0.7", features = ["io"] }
 cap-std = "3"

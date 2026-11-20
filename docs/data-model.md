@@ -1,5 +1,7 @@
 # Модель данных
 
+Миграция `0010_standalone_updates.sql` добавляет `applications.standalone_public_key` (nullable, уникальный публичный Ed25519 JWK x) и `artifacts.standalone_signature` (nullable compact JWS, до 4096 байт). Подпись разрешена только для installer формата exe/bin с конкретными ОС/архитектурой. Один standalone на release/target; ключ нельзя заменить при наличии подписанных артефактов. Существующие триггеры неизменности опубликованных файлов распространяются на новое поле. Отдельный триггер закрывает обход через REPLACE. Исторические строки получают NULL и продолжают работать без изменений. [Контракт и доверие](integrations/standalone.md).
+
 SQLite с foreign_keys=ON на каждом соединении, WAL, bounded pool и busy timeout. Все миграции добавляются последовательно; применённые SQL не изменяются. Время в SQLite — INTEGER Unix seconds UTC. В манифестах — UTC RFC 3339, в административных DTO — Unix seconds.
 
 Существующие identity/application таблицы описаны в [архитектуре](architecture.md). Миграция 0005 перестраивает releases/artifacts с переносом строк при включённых внешних ключах: старые artifacts удаляются прежде старого parent, новые child-ссылки корректируются SQLite при переименовании нового parent. Ключи дисковых объектов не меняются. Проверка миграции покрывает реальные файлы/хеши, FK check и повторный startup.

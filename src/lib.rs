@@ -76,6 +76,7 @@ pub async fn application_state(
         ),
         manifests: services::manifest::ManifestGeneration::new(distribution.clone()),
         updater: services::updater::TauriUpdater::new(distribution.clone()),
+        standalone_updater: services::standalone::StandaloneUpdater::new(distribution.clone()),
         distribution,
         storage_config: config.storage.clone(),
         releases: services::release::ReleaseManagement::new(releases.clone(), storage.clone()),

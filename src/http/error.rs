@@ -6,6 +6,9 @@ use axum::{
 use serde::Serialize;
 
 pub enum ApiError {
+    InvalidStandalone,
+    StandaloneKeyConflict,
+    StandaloneUnavailable,
     NotFound,
     MethodNotAllowed,
     BadRequest,
@@ -53,6 +56,21 @@ struct ErrorBody {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::InvalidStandalone => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_standalone",
+                "Invalid standalone metadata, signature, key or platform",
+            ),
+            Self::StandaloneKeyConflict => (
+                StatusCode::CONFLICT,
+                "standalone_key_conflict",
+                "Key is already used or pinned by signed artifacts",
+            ),
+            Self::StandaloneUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "standalone_unavailable",
+                "Standalone update is blocked; contact the application administrator",
+            ),
             Self::AmbiguousArtifact => (
                 StatusCode::CONFLICT,
                 "ambiguous_artifact",

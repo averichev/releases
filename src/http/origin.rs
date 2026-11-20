@@ -9,7 +9,9 @@ use axum::{
 };
 
 use super::{AppState, error::ApiError};
-use crate::services::{manifest::ManifestGeneration, updater::TauriUpdater};
+use crate::services::{
+    manifest::ManifestGeneration, standalone::StandaloneUpdater, updater::TauriUpdater,
+};
 
 fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, ApiError> {
     let mut values = headers.get_all(name).iter();
@@ -87,6 +89,7 @@ pub async fn resolve(
             state.distribution.config.public_base_url = origin;
             state.manifests = ManifestGeneration::new(state.distribution.clone());
             state.updater = TauriUpdater::new(state.distribution.clone());
+            state.standalone_updater = StandaloneUpdater::new(state.distribution.clone());
             state.tauri_integration = state
                 .tauri_integration
                 .with_distribution(state.distribution.clone());

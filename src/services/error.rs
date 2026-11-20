@@ -1,5 +1,11 @@
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
+    #[error("Invalid standalone metadata, signature, key or platform")]
+    InvalidStandalone,
+    #[error("Standalone key is already used or pinned by signed artifacts")]
+    StandaloneKeyConflict,
+    #[error("Standalone update is blocked")]
+    StandaloneUnavailable,
     #[error("Invalid request")]
     Invalid,
     #[error("Invalid credentials")]

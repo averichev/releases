@@ -54,6 +54,7 @@ impl ApplicationCatalog {
             description: application::description(&input.description)
                 .ok_or(ServiceError::InvalidApplication)?,
             icon_key: None,
+            standalone_public_key: None,
             visibility: input.visibility,
             status: Status::Active,
             created_at: now,
@@ -152,6 +153,22 @@ impl ApplicationCatalog {
         Self::authorize(&mut tx, actor).await?;
         ApplicationsRepository::get_in(&mut tx, id).await?;
         ApplicationsRepository::set_tauri_key(&mut tx, id, key.as_deref(), secrets::now()).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+    pub async fn set_standalone_key(
+        &self,
+        actor: &Identity,
+        id: &str,
+        key: Option<&str>,
+    ) -> Result<()> {
+        if key.is_some_and(|v| !crate::domain::standalone::public_key(v)) {
+            return Err(ServiceError::InvalidStandalone);
+        }
+        let mut tx = self.repository.write().await?;
+        Self::authorize(&mut tx, actor).await?;
+        ApplicationsRepository::get_in(&mut tx, id).await?;
+        ApplicationsRepository::set_standalone_key(&mut tx, id, key, secrets::now()).await?;
         tx.commit().await?;
         Ok(())
     }

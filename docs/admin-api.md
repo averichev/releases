@@ -13,8 +13,13 @@
 | GET / HEAD | `/{id}/icon` | 200, нормализованный PNG; 404 без иконки |
 | POST | `/{id}/icon` | 200, Application DTO с новым icon_url |
 | DELETE | `/{id}/icon` | 200, Application DTO с icon_url = null |
+| GET | `/{id}/integrations/standalone` | 200, `{application_id,public_key}`; operator/admin |
+| PUT | `/{id}/integrations/standalone` | 204; `{public_key: string|null}`; admin + CSRF |
+| PUT | `/{id}/releases/{release}/artifacts/{artifact}/standalone` | 200, Artifact DTO; `{signed_metadata: string|null}`; только черновик, admin + CSRF |
 
 `id` — постоянный UUID. Физическое удаление приложений отсутствует; DELETE `/{id}` возвращает 405.
+
+Multipart загрузка артефакта также принимает файл `standalone_signature` (`.jws`, максимум 4096 байт), проверяемый до фиксации. Наличие подписи явно назначает installer для standalone-обновлений. Artifact DTO дополнен `standalone_signature_present`; роль и прежний `signature_present` для Tauri не меняются. Опубликованный релиз можно дополнить подписанным файлом другой платформы в одной загрузке. Формат JWS, ограничения ключа и примеры: [standalone](integrations/standalone.md).
 
 ## Список
 

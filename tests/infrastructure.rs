@@ -58,7 +58,7 @@ async fn creates_configured_paths_and_applies_baseline_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(migrations, 9);
+    assert_eq!(migrations, 10);
     pool.close().await;
 }
 
@@ -123,7 +123,7 @@ async fn catalog_migration_preserves_an_existing_identity_database() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        9
+        10
     );
 }
 
@@ -222,11 +222,7 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
     use base64::{Engine, engine::general_purpose::STANDARD};
     use veruna_releases::{
         application_state,
-        domain::{
-            application::{NewApplication, Visibility},
-            artifact::UploadMetadata,
-            release::ReleaseInput,
-        },
+        domain::application::{NewApplication, Visibility},
     };
     let dir = tempdir().unwrap();
     let mut config = AppConfig::default();
@@ -285,19 +281,12 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
         )
         .await
         .unwrap();
-    let r = state
-        .releases
-        .create(
-            &actor,
-            &app.id,
-            ReleaseInput {
-                version: "0.5.0+ci.7".into(),
-                title: Some("Preserve title".into()),
-                release_notes: "Preserve notes".into(),
-            },
-        )
-        .await
-        .unwrap();
+    // Seed historical rows with historical SQL: current service writes require
+    // the current schema, which is deliberately absent in this upgrade fixture.
+    let release_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO releases(id,application_id,version,version_key,title,release_notes,created_at,updated_at) VALUES(?,?,'0.5.0+ci.7','0.5.0','Preserve title','Preserve notes',1,1)")
+        .bind(&release_id).bind(&app.id).execute(&pool).await.unwrap();
+    let r = state.releases.get(&app.id, &release_id).await.unwrap();
     let mut packet = [0u8; 74];
     packet[..2].copy_from_slice(b"Ed");
     let sig = STANDARD.encode(format!(
@@ -305,24 +294,30 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
         STANDARD.encode(packet),
         STANDARD.encode([0u8; 64])
     ));
-    let mut pending = state
-        .artifacts
-        .begin(
-            &actor,
-            &app.id,
-            &r.id,
-            UploadMetadata {
-                filename: "updater.exe".into(),
-                target: "windows-x86_64".into(),
-                file_type: None,
-                distribution_role: Some("updater".into()),
-            },
-        )
-        .await
-        .unwrap();
-    pending.set_signature(sig.as_bytes()).unwrap();
+    let storage = LocalArtifactStorage::new(&config.storage);
+    let mut pending = storage.begin().await.unwrap();
     pending.write(b"package").await.unwrap();
-    let a = state.artifacts.complete(&actor, pending).await.unwrap();
+    storage.promote(&mut pending).await.unwrap();
+    let a = veruna_releases::domain::artifact::Artifact {
+        id: uuid::Uuid::new_v4().to_string(),
+        release_id: r.id.clone(),
+        filename: "updater.exe".into(),
+        target: "windows-x86_64".into(),
+        file_type: "exe".into(),
+        size_bytes: 7,
+        sha256: pending.sha256(),
+        storage_key: pending.storage_key().into(),
+        created_at: 1,
+        distribution_role: "updater".into(),
+        updater_signature: Some(sig),
+        standalone_signature: None,
+    };
+    sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(&a.id).bind(&a.release_id).bind(&a.filename).bind(&a.target).bind(&a.file_type)
+        .bind(a.size_bytes).bind(&a.sha256).bind(&a.storage_key).bind(a.created_at)
+        .bind(&a.distribution_role).bind(&a.updater_signature).execute(&pool).await.unwrap();
+    pending.preserve_on_commit();
+    drop(pending);
     sqlx::query("UPDATE releases SET status='published',published_at=updated_at WHERE id=?")
         .bind(&r.id)
         .execute(&pool)
@@ -382,7 +377,7 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
             .fetch_one(&pool)
             .await
             .unwrap(),
-        9
+        10
     );
     pool.close().await;
 }

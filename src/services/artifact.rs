@@ -36,8 +36,24 @@ pub struct ArtifactUpload {
     file_type: String,
     distribution_role: String,
     updater_signature: Option<String>,
+    standalone_signature: Option<String>,
 }
 impl ArtifactUpload {
+    pub fn set_standalone_signature(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.distribution_role != "installer"
+            || bytes.is_empty()
+            || bytes.len() > crate::domain::standalone::MAX_SIGNATURE_BYTES
+        {
+            return Err(ServiceError::InvalidStandalone);
+        }
+        self.standalone_signature = Some(
+            std::str::from_utf8(bytes)
+                .map_err(|_| ServiceError::InvalidStandalone)?
+                .trim()
+                .to_owned(),
+        );
+        Ok(())
+    }
     pub fn set_signature(&mut self, bytes: &[u8]) -> Result<()> {
         if self.distribution_role != "updater" {
             return Err(ServiceError::InvalidUpdater);
@@ -113,6 +129,7 @@ impl ArtifactManagement {
             file_type,
             distribution_role: role.to_owned(),
             updater_signature: None,
+            standalone_signature: None,
         })
     }
     pub async fn complete(&self, actor: &Identity, mut upload: ArtifactUpload) -> Result<Artifact> {
@@ -130,10 +147,24 @@ impl ArtifactManagement {
             created_at: now,
             distribution_role: upload.distribution_role,
             updater_signature: upload.updater_signature,
+            standalone_signature: upload.standalone_signature,
         };
         let mut tx = self.releases.write().await?;
         authorize(&mut tx, actor).await?;
         let release = ReleasesRepository::get_in(&mut tx, &upload.app, &upload.release).await?;
+        if let Some(signature) = &artifact.standalone_signature {
+            let app = ApplicationsRepository::get_in(&mut tx, &upload.app).await?;
+            if app
+                .standalone_public_key
+                .as_deref()
+                .and_then(|key| {
+                    crate::domain::standalone::verify(signature, key, &app.id, &release, &artifact)
+                })
+                .is_none()
+            {
+                return Err(ServiceError::InvalidStandalone);
+            }
+        }
         ArtifactsRepository::check_conflict(
             &mut tx,
             &upload.release,
@@ -220,6 +251,9 @@ impl ArtifactManagement {
                 return Err(ServiceError::InvalidUpdater);
             }
             artifact.distribution_role = role.into();
+            if role == "updater" && artifact.standalone_signature.is_some() {
+                return Err(ServiceError::InvalidStandalone);
+            }
             if role == "installer" {
                 artifact.updater_signature = None;
             }
@@ -249,6 +283,44 @@ impl ArtifactManagement {
         .await?;
         ReleasesRepository::touch(&mut tx, release, secrets::now()).await?;
         tx.commit().await?;
+        Ok(artifact)
+    }
+    /// Attach/clear standalone intent on drafts. Published artifacts remain immutable;
+    /// signed additions to a published release must use the atomic upload path.
+    pub async fn set_standalone(
+        &self,
+        actor: &Identity,
+        app: &str,
+        release: &str,
+        id: &str,
+        signature: Option<&str>,
+    ) -> Result<Artifact> {
+        let mut tx = self.releases.write().await?;
+        authorize(&mut tx, actor).await?;
+        let r = ReleasesRepository::get_in(&mut tx, app, release).await?;
+        draft(&r)?;
+        let mut artifact = ArtifactsRepository::list_in(&mut tx, release)
+            .await?
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or(ServiceError::NotFound)?;
+        if let Some(signature) = signature {
+            let app = ApplicationsRepository::get_in(&mut tx, app).await?;
+            if app
+                .standalone_public_key
+                .as_deref()
+                .and_then(|key| {
+                    crate::domain::standalone::verify(signature, key, &app.id, &r, &artifact)
+                })
+                .is_none()
+            {
+                return Err(ServiceError::InvalidStandalone);
+            }
+        }
+        ArtifactsRepository::standalone(&mut tx, id, signature).await?;
+        ReleasesRepository::touch(&mut tx, release, secrets::now()).await?;
+        tx.commit().await?;
+        artifact.standalone_signature = signature.map(str::to_owned);
         Ok(artifact)
     }
     pub async fn verify(
