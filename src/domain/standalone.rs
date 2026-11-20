@@ -1,6 +1,7 @@
 //! Bounded JWS profile for standalone executables. Signing happens off-server.
 use super::{artifact::Artifact, release::Release};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use jsonwebtoken::jwk::{Jwk, ThumbprintHash};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 
@@ -45,11 +46,35 @@ pub fn public_key(value: &str) -> bool {
         .is_some_and(|key| !key.is_weak())
 }
 
+/// RFC 7638 identifier, derived from a locally trusted Ed25519 key.
+/// It selects a key; it never establishes trust or fetches a remote key.
+pub fn key_id(value: &str) -> Option<String> {
+    if !public_key(value) {
+        return None;
+    }
+    Jwk::from_decoding_key(
+        &DecodingKey::from_ed_components(value).ok()?,
+        Some(Algorithm::EdDSA),
+    )
+    .ok()?
+    .thumbprint(ThumbprintHash::SHA256)
+    .ok()
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProtectedHeader {
     alg: String,
     typ: String,
+    #[serde(default, deserialize_with = "deserialize_key_id")]
+    kid: Option<String>,
+}
+
+fn deserialize_key_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    // Missing is compatible with the original profile; explicit null is not a JWS kid.
+    String::deserialize(deserializer).map(Some)
 }
 
 pub fn verify(
@@ -72,7 +97,13 @@ pub fn verify(
     // payloads and algorithm negotiation. The JOSE library verifies the signature.
     let header = URL_SAFE_NO_PAD.decode(jws.split('.').next()?).ok()?;
     let header: ProtectedHeader = serde_json::from_slice(&header).ok()?;
-    if header.alg != "EdDSA" || header.typ != MEDIA_TYPE {
+    if header.alg != "EdDSA"
+        || header.typ != MEDIA_TYPE
+        || header
+            .kid
+            .as_deref()
+            .is_some_and(|kid| key_id(key).as_deref() != Some(kid))
+    {
         return None;
     }
     let mut validation = Validation::new(Algorithm::EdDSA);

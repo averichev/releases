@@ -70,8 +70,12 @@ async fn settings(
 ) -> Result<Json<Value>, ApiError> {
     let [id] = ids(path)?;
     let app = state.applications.get(&id).await?;
+    let key_id = app
+        .standalone_public_key
+        .as_deref()
+        .and_then(crate::domain::standalone::key_id);
     Ok(Json(
-        json!({"application_id":app.id,"public_key":app.standalone_public_key}),
+        json!({"application_id":app.id,"public_key":app.standalone_public_key,"key_id":key_id}),
     ))
 }
 #[derive(Deserialize)]

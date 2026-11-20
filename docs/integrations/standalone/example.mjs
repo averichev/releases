@@ -5,6 +5,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
 const typ = 'releases-standalone+jws';
+const keyId = jwk => createHash('sha256')
+  .update(JSON.stringify({ crv: 'Ed25519', kty: 'OKP', x: jwk.x }))
+  .digest('base64url'); // RFC 7638; required public JWK members in lexical order.
 const fields = ['schema_version', 'application_id', 'version', 'os', 'arch', 'size_bytes', 'sha256'].sort();
 async function metadata(application_id, version, target, file) {
   const parts = target.split('-');
@@ -28,11 +31,13 @@ if (command === 'keygen' && args.length === 1) {
   const jwk = publicKey.export({ format: 'jwk' });
   await writeFile(`${args[0]}.public.jwk`, `${JSON.stringify(jwk)}\n`, { flag: 'wx' });
   console.log(JSON.stringify({ public_key: jwk.x })); // Only this public value goes to Releases.
-} else if (command === 'sign' && args.length === 5) {
+} else if (command === 'sign' && (args.length === 5 || args.length === 6 && args[5] === '--kid')) {
   const [keyFile, app, version, target, file] = args;
   const key = createPrivateKey(await readFile(keyFile));
   assert(key.asymmetricKeyType === 'ed25519');
-  const input = `${encode({ alg: 'EdDSA', typ })}.${encode(await metadata(app, version, target, file))}`;
+  const header = { alg: 'EdDSA', typ };
+  if (args[5] === '--kid') header.kid = keyId(createPublicKey(key).export({ format: 'jwk' }));
+  const input = `${encode(header)}.${encode(await metadata(app, version, target, file))}`;
   console.log(`${input}.${sign(null, Buffer.from(input), key).toString('base64url')}`);
 } else if (command === 'verify' && args.length === 6) {
   const [keyFile, app, version, target, file, jwsFile] = args;
@@ -43,12 +48,15 @@ if (command === 'keygen' && args.length === 1) {
   const parts = jws.split('.');
   assert(parts.length === 3);
   const [header, payload, signature] = parts;
-  assert.deepEqual(JSON.parse(decode(header)), { alg: 'EdDSA', typ });
+  const protectedHeader = JSON.parse(decode(header));
+  const expected = { alg: 'EdDSA', typ };
+  if (Object.hasOwn(protectedHeader, 'kid')) expected.kid = keyId(jwk);
+  assert.deepEqual(protectedHeader, expected);
   assert(verify(null, Buffer.from(`${header}.${payload}`), createPublicKey({ key: jwk, format: 'jwk' }), decode(signature)), 'invalid signature');
   const m = JSON.parse(decode(payload));
   assert.deepEqual(Object.keys(m).sort(), fields);
   assert.deepEqual(m, await metadata(app, version, target, file), 'metadata/content mismatch');
   console.log('Verified signature, application, version, platform, size and SHA-256');
 } else {
-  throw new Error('Usage: keygen <prefix> | sign <private.pem> <app-uuid> <version> <target> <file> | verify <public.jwk> <app-uuid> <version> <target> <file> <file.jws>');
+  throw new Error('Usage: keygen <prefix> | sign <private.pem> <app-uuid> <version> <target> <file> [--kid] | verify <public.jwk> <app-uuid> <version> <target> <file> <file.jws>');
 }

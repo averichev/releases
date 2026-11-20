@@ -319,8 +319,35 @@ async fn three_signed_installers_sparse_platforms_semver_and_manifest_remain_com
     t.upload(&newer, "darwin-aarch64", true).await;
     t.publish(&newer).await.unwrap();
     let unsigned = t.create("9.0.0").await;
-    t.upload(&unsigned, "windows-x86_64", false).await;
+    let unsigned_artifact = t.upload(&unsigned, "windows-x86_64", false).await;
     t.publish(&unsigned).await.unwrap();
+    let unsigned_path =
+        t.state
+            .distribution
+            .artifact_path("product", &unsigned, &unsigned_artifact);
+    let manual = t.get(&unsigned_path).await;
+    assert_eq!(manual.status(), 200);
+    assert!(manual.headers().contains_key("content-disposition"));
+    assert_eq!(
+        manual
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .as_ref(),
+        CONTENT
+    );
+    let shortcut = t.get("/product/latest/windows-x86_64").await;
+    assert_eq!(shortcut.status(), 307);
+    assert_eq!(shortcut.headers()["location"], unsigned_path);
+    let originals = t.state.artifacts.list(&t.app, &old.id).await.unwrap();
+    assert_eq!(originals.len(), 3);
+    assert!(
+        originals
+            .iter()
+            .all(|a| a.distribution_role == "installer" && a.updater_signature.is_none())
+    );
     let pre = t.create("10.0.0-rc.1").await;
     t.upload(&pre, "windows-x86_64", true).await;
     t.publish(&pre).await.unwrap();
@@ -784,6 +811,21 @@ async fn integrity_publication_rollback_and_missing_file_block_instead_of_fallin
         body(blocked).await["error"]["code"],
         "standalone_unavailable"
     );
+    // JWS readiness never gates ordinary delivery of an intact published file.
+    let manual = t
+        .get(&t.state.distribution.artifact_path("product", &r, &a))
+        .await;
+    assert_eq!(manual.status(), 200);
+    assert_eq!(
+        manual
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .as_ref(),
+        CONTENT
+    );
     sqlx::query("UPDATE artifacts SET standalone_signature=? WHERE id=?")
         .bind(&a.standalone_signature)
         .bind(&a.id)
@@ -1019,6 +1061,46 @@ async fn offline_documented_example_interoperates_with_server_and_rejects_tamper
             .status(),
         201
     );
+    assert!(
+        jsonwebtoken::decode_header(jws.trim())
+            .unwrap()
+            .kid
+            .is_none()
+    );
+    // Explicit opt-in changes only the JWS header, never the stored executable.
+    let with_kid = tokio::process::Command::new("node")
+        .arg(&script)
+        .arg("sign")
+        .arg(prefix.with_extension("pem"))
+        .arg(&t.app)
+        .args(["0.5.0", "windows-x86_64"])
+        .arg(&file)
+        .arg("--kid")
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        with_kid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&with_kid.stderr)
+    );
+    let with_kid = String::from_utf8(with_kid.stdout).unwrap();
+    let a = t
+        .state
+        .artifacts
+        .list(&t.app, &r.id)
+        .await
+        .unwrap()
+        .remove(0);
+    t.state
+        .artifacts
+        .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(with_kid.trim()))
+        .await
+        .unwrap();
+    assert_eq!(
+        jsonwebtoken::decode_header(with_kid.trim()).unwrap().kid,
+        standalone::key_id(key["public_key"].as_str().unwrap())
+    );
     t.publish(&r).await.unwrap();
     let update = body(t.update("windows-x86_64", "0.4.0").await).await;
     let jws_file = t._dir.path().join("product.jws");
@@ -1084,4 +1166,71 @@ async fn publication_races_with_removing_standalone_designation_never_commit_sta
         }
         other => panic!("Unexpected publication/removal result: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn optional_key_id_is_bound_to_trusted_key_and_legacy_signatures_still_work() {
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    let a = t.upload(&r, "windows-x86_64", false).await;
+    // RFC 8037 A.3: the RFC 7638 SHA-256 thumbprint of this test public JWK.
+    let kid = standalone::key_id(PUBLIC_KEY).unwrap();
+    assert_eq!(kid, "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k");
+    let settings = body(
+        t.admin(
+            "GET",
+            &format!("{}/integrations/standalone", t.base()),
+            Value::Null,
+            Some(&t.token),
+            true,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(settings["key_id"], kid);
+    let payload = metadata(&t.app, "0.5.0", "windows-x86_64");
+    let mut header = Header::new(Algorithm::EdDSA);
+    header.typ = Some(standalone::MEDIA_TYPE.into());
+    for invalid in ["", "unknown-key", "https://untrusted.invalid/key.jwk"] {
+        header.kid = Some(invalid.into());
+        let signature = sign_header(&payload, &header, &SEED);
+        assert!(matches!(
+            t.state
+                .artifacts
+                .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(&signature))
+                .await,
+            Err(ServiceError::InvalidStandalone)
+        ));
+    }
+    header.kid = None;
+    header.extras.insert("kid", Value::Null);
+    let signature = sign_header(&payload, &header, &SEED);
+    assert!(matches!(
+        t.state
+            .artifacts
+            .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(&signature))
+            .await,
+        Err(ServiceError::InvalidStandalone)
+    ));
+    // No identifier remains a valid, unambiguous reference to the one pinned key.
+    for kid in [None, Some(kid)] {
+        let mut header = Header::new(Algorithm::EdDSA);
+        header.typ = Some(standalone::MEDIA_TYPE.into());
+        header.kid = kid;
+        let signature = sign_header(&payload, &header, &SEED);
+        t.state
+            .artifacts
+            .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(&signature))
+            .await
+            .unwrap();
+    }
+    t.publish(&r).await.unwrap();
+    let update = body(t.update("windows-x86_64", "0.4.0").await).await;
+    let header = jsonwebtoken::decode_header(update["signed_metadata"].as_str().unwrap()).unwrap();
+    assert_eq!(header.kid, standalone::key_id(PUBLIC_KEY));
+    assert_eq!(
+        t.state.artifacts.list(&t.app, &r.id).await.unwrap().len(),
+        1
+    );
+    t.assert_storage_count(1).await;
 }

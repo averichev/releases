@@ -13,7 +13,7 @@
 | GET / HEAD | `/{id}/icon` | 200, нормализованный PNG; 404 без иконки |
 | POST | `/{id}/icon` | 200, Application DTO с новым icon_url |
 | DELETE | `/{id}/icon` | 200, Application DTO с icon_url = null |
-| GET | `/{id}/integrations/standalone` | 200, `{application_id,public_key}`; operator/admin |
+| GET | `/{id}/integrations/standalone` | 200, `{application_id,public_key,key_id}`; operator/admin |
 | PUT | `/{id}/integrations/standalone` | 204; `{public_key: string|null}`; admin + CSRF |
 | PUT | `/{id}/releases/{release}/artifacts/{artifact}/standalone` | 200, Artifact DTO; `{signed_metadata: string|null}`; только черновик, admin + CSRF |
 
