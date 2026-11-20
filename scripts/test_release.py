@@ -41,9 +41,56 @@ class ReleaseTests(unittest.TestCase):
 
     def run_release(self, builder=None):
         with patch.object(release, "build_binaries", side_effect=builder or self.fake_build) as build:
-            with redirect_stdout(io.StringIO()):
+            with redirect_stdout(io.StringIO()) as console:
                 output = release.release(self.root)
+            self.console = console.getvalue()
             return output, build.call_count
+
+    def test_release_commits_include_all_changes_and_repeat_keeps_the_same_list(self):
+        self.git("tag", "v0.1.0")
+        docs = self.commit("docs: уточнить запуск")
+        feature = self.commit("feat: добавить возможность")
+        output, _ = self.run_release()
+        header = "Коммиты релиза (v0.1.0 → v0.2.0):\n"
+        first = self.console.split(header)[1]
+        self.assertIn(f"{self.git('rev-parse', '--short', docs)} docs: уточнить запуск", first)
+        self.assertIn(f"{self.git('rev-parse', '--short', feature)} feat: добавить возможность", first)
+        self.assertLess(first.index("docs:"), first.index("feat:"))
+        self.assertNotIn("начальный коммит", first)
+        before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in output.iterdir()}
+        self.assertEqual(self.run_release(), (output, 0))
+        self.assertIn("уже собран", self.console)
+        self.assertEqual(self.console.split(header)[1], first)
+        self.assertEqual(before, {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in output.iterdir()})
+
+    def test_first_release_commit_list_starts_at_the_beginning_of_history(self):
+        self.commit("feat: добавить возможность")
+        self.run_release()
+        self.assertIn("Коммиты релиза (начало истории → v0.2.0):", self.console)
+        self.assertIn("chore: начальный коммит", self.console)
+        self.assertIn("feat: добавить возможность", self.console)
+
+    def test_tagged_head_commit_list_includes_merged_changes_and_excludes_other_tags(self):
+        self.git("tag", "v1.0.0")
+        base_branch = self.git("branch", "--show-current")
+        self.git("switch", "--quiet", "-c", "feature")
+        self.commit("feat: изменение в ветке")
+        self.git("tag", "v9.0.0-beta.1")
+        self.git("switch", "--quiet", base_branch)
+        self.commit("docs: уточнение в основной ветке")
+        self.git("merge", "--quiet", "--no-ff", "feature", "-m", "Merge feature")
+        self.git("tag", "-a", "v1.1.0", "-m", "Релиз 1.1.0")
+        head = self.git("rev-parse", "HEAD")
+        self.commit("feat: изменение вне релиза")
+        self.git("tag", "v9.0.0")
+        self.git("reset", "--hard", head)
+        self.run_release()
+        history = self.console.split("Коммиты релиза (v1.0.0 → v1.1.0):\n")[1]
+        self.assertIn("feat: изменение в ветке", history)
+        self.assertIn("docs: уточнение в основной ветке", history)
+        self.assertIn("Merge feature", history)
+        self.assertNotIn("начальный коммит", history)
+        self.assertNotIn("изменение вне релиза", history)
 
     def test_conventional_commits_choose_the_highest_bump_since_the_last_tag(self):
         for tag, message, expected in [

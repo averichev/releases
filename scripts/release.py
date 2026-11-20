@@ -58,14 +58,18 @@ class Plan:
     bump: str | None
 
 
+def stable_tags(root, commit):
+    return [tag for tag in git(root, "tag", "--merged", commit).splitlines()
+            if tag.startswith("v") and VERSION.fullmatch(tag[1:])]
+
+
 def calculate(root):
     if git(root, "rev-parse", "--is-shallow-repository") == "true":
         raise ReleaseError("Нужна полная история Git: выполните git fetch --unshallow --tags.")
     seed = package(root)["version"]
     version_parts(seed)
     commit = git(root, "rev-parse", "HEAD")
-    tags = [tag for tag in git(root, "tag", "--merged", commit).splitlines()
-            if tag.startswith("v") and VERSION.fullmatch(tag[1:])]
+    tags = stable_tags(root, commit)
     previous = max(tags, key=lambda tag: version_parts(tag[1:]), default=None)
     base = previous[1:] if previous else seed
     if previous and git(root, "rev-parse", f"{previous}^{{commit}}") == commit:
@@ -89,6 +93,24 @@ def calculate(root):
     if impact >= 2:
         return Plan(f"{major}.{minor + 1}.0", commit, previous, "minor")
     return Plan(f"{major}.{minor}.{patch + 1}", commit, previous, "patch")
+
+
+def show_release_commits(root, plan):
+    # HEAD may already carry this release's tag. Exclude it so retries show
+    # the release's changes, rather than an empty current-tag..HEAD range.
+    previous = max(
+        (tag for tag in stable_tags(root, plan.commit)
+         if version_parts(tag[1:]) < version_parts(plan.version)),
+        key=lambda tag: version_parts(tag[1:]), default=None,
+    )
+    history = f"{previous}..{plan.commit}" if previous else plan.commit
+    commits = git(root, "log", "--reverse", "--topo-order", "--no-color",
+                  "--no-show-signature", "--format=%h %s", history).splitlines()
+    print(f"Коммиты релиза ({previous or 'начало истории'} → v{plan.version}):")
+    for commit in commits:
+        print(f"  {commit}")
+    if not commits:
+        print("  Новых коммитов нет.")
 
 
 def require_clean(root):
@@ -210,6 +232,7 @@ def release(root):
             verify_output(output, name, plan)
             ensure_tag(root, plan)
             print(f"Релиз {plan.version} уже собран: {output}")
+            show_release_commits(root, plan)
             return output
         reason = f"{plan.previous_tag or package(root)['version']} → {plan.version} ({plan.bump})" if plan.bump else (
             f"тег {tag}" if plan.previous_tag else "базовая Cargo-версия")
@@ -235,6 +258,7 @@ def release(root):
         # validates its hashes and finishes tagging without rebuilding or overwriting.
         ensure_tag(root, plan)
         print(f"Релиз {plan.version} собран: {output}\nЛокальный тег: {tag}.")
+        show_release_commits(root, plan)
         return output
 
 
