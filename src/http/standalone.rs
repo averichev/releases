@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 const SETTINGS: &str = "/admin/applications/{id}/integrations/standalone";
 pub fn admin_router() -> Router<AppState> {
     Router::new()
-        .route(SETTINGS, put(save_key))
+        .route(SETTINGS, put(save_settings))
         .route(
             "/admin/applications/{id}/releases/{release}/artifacts/{artifact}/standalone",
             put(save_signature),
@@ -47,20 +47,34 @@ async fn update(
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct KeyRequest {
-    public_key: Option<String>,
+struct SettingsRequest {
+    #[serde(default, deserialize_with = "setting")]
+    public_key: Option<Option<String>>,
+    #[serde(default, deserialize_with = "setting")]
+    product_id: Option<Option<String>>,
 }
-async fn save_key(
+// Serde's Option alone maps missing and null to the same value.
+fn setting<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+async fn save_settings(
     Extension(state): Extension<AppState>,
     Extension(actor): Extension<Identity>,
     path: Result<Path<[String; 1]>, PathRejection>,
-    payload: Result<Json<KeyRequest>, JsonRejection>,
+    payload: Result<Json<SettingsRequest>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
     let [app] = ids(path)?;
     let p = auth::json(payload)?;
     state
         .applications
-        .set_standalone_key(&actor, &app, p.public_key.as_deref())
+        .set_standalone_settings(
+            &actor,
+            &app,
+            p.product_id.as_ref().map(|v| v.as_deref()),
+            p.public_key.as_ref().map(|v| v.as_deref()),
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -75,7 +89,7 @@ async fn settings(
         .as_deref()
         .and_then(crate::domain::standalone::key_id);
     Ok(Json(
-        json!({"application_id":app.id,"public_key":app.standalone_public_key,"key_id":key_id}),
+        json!({"application_id":app.id,"product_id":app.product_id,"public_key":app.standalone_public_key,"key_id":key_id}),
     ))
 }
 #[derive(Deserialize)]

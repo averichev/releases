@@ -154,14 +154,7 @@ impl ArtifactManagement {
         let release = ReleasesRepository::get_in(&mut tx, &upload.app, &upload.release).await?;
         if let Some(signature) = &artifact.standalone_signature {
             let app = ApplicationsRepository::get_in(&mut tx, &upload.app).await?;
-            if app
-                .standalone_public_key
-                .as_deref()
-                .and_then(|key| {
-                    crate::domain::standalone::verify(signature, key, &app.id, &release, &artifact)
-                })
-                .is_none()
-            {
+            if crate::domain::standalone::verify(signature, &app, &release, &artifact).is_none() {
                 return Err(ServiceError::InvalidStandalone);
             }
         }
@@ -306,14 +299,7 @@ impl ArtifactManagement {
             .ok_or(ServiceError::NotFound)?;
         if let Some(signature) = signature {
             let app = ApplicationsRepository::get_in(&mut tx, app).await?;
-            if app
-                .standalone_public_key
-                .as_deref()
-                .and_then(|key| {
-                    crate::domain::standalone::verify(signature, key, &app.id, &r, &artifact)
-                })
-                .is_none()
-            {
+            if crate::domain::standalone::verify(signature, &app, &r, &artifact).is_none() {
                 return Err(ServiceError::InvalidStandalone);
             }
         }

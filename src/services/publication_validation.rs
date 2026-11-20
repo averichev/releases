@@ -126,20 +126,13 @@ impl PublicationValidator {
                 }
             }
             if let Some(signature) = &artifact.standalone_signature
-                && snapshot
-                    .application
-                    .standalone_public_key
-                    .as_deref()
-                    .and_then(|key| {
-                        crate::domain::standalone::verify(
-                            signature,
-                            key,
-                            &snapshot.application.id,
-                            &snapshot.release,
-                            artifact,
-                        )
-                    })
-                    .is_none()
+                && crate::domain::standalone::verify(
+                    signature,
+                    &snapshot.application,
+                    &snapshot.release,
+                    artifact,
+                )
+                .is_none()
             {
                 errors.push(issue(
                     "standalone_invalid",

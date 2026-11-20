@@ -6,6 +6,16 @@ SQLite с foreign_keys=ON на каждом соединении, WAL, bounded p
 
 Существующие identity/application таблицы описаны в [архитектуре](architecture.md). Миграция 0005 перестраивает releases/artifacts с переносом строк при включённых внешних ключах: старые artifacts удаляются прежде старого parent, новые child-ссылки корректируются SQLite при переименовании нового parent. Ключи дисковых объектов не меняются. Проверка миграции покрывает реальные файлы/хеши, FK check и повторный startup.
 
+## Идентичность standalone-продукта
+
+`applications.id` — внутренний неизменяемый UUID для FK и административного API; `slug` — постоянный адрес в этом экземпляре сервера. Миграция `0011_standalone_product_identity.sql` добавляет nullable `applications.product_id` — UUID издателя в канонической строчной форме `8-4-4-4-12`, с CHECK и частичным UNIQUE для всех приложений, включая архив. При создании записи он NULL: генерации на сервере нет. Один UUID допустим на разных независимых серверах. Поле `application_id` в JWS v1 хранит этот `product_id`; дополнительных полей протокола нет.
+
+`product_id_locked` — INTEGER 0/1 (по умолчанию 0), техническое постоянное закрепление после первой standalone-подписи. INSERT/UPDATE подписанного артефакта требует непустой `product_id` и атомарно ставит флаг. Триггеры запрещают изменение/очистку закреплённого UUID, снятие флага и замену такой записи через INSERT OR REPLACE. Удаление подписанного черновика не снимает закрепление. Связи release/application и artifact/release остаются внутренними UUID.
+
+Миграция назначает `product_id=id`, `product_id_locked=1` только существующим приложениям с `standalone_signature IS NOT NULL` в любом релизе, включая draft. Остальные остаются NULL/0, даже при настроенном ключе. Содержимое JWS, UUID релизов/артефактов, ключи, версии, файлы и их SHA-256 сохраняются. Старые подписи проверяются побайтно без нового подписания.
+
+Миграция `0010_standalone_updates.sql` хранит nullable `applications.standalone_public_key` (публичный Ed25519 JWK x, 43 base64url символа) и `artifacts.standalone_signature` (1–4096 символов JWS, только совместимый installer). Ключ уникален внутри сервера и защищён от замены/очистки при наличии подписей, включая черновики. Частичный UNIQUE(release_id,target) при непустой standalone_signature исключает неоднозначный standalone. Приватные ключи в БД отсутствуют.
+
 ## releases
 
 UUID id; application_id → applications, RESTRICT; version и version_key (без build metadata); title; release_notes; status `draft|published`; revision; created_at; updated_at; published_at. UNIQUE(application_id,version_key), UNIQUE(id,application_id) для составных FK. CHECK связывает status с NULL/значением published_at. Новые релизы — draft. При metadata/артефактных изменениях сервис увеличивает revision; timestamp не используется для optimistic locking.

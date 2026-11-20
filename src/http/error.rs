@@ -8,6 +8,7 @@ use serde::Serialize;
 pub enum ApiError {
     InvalidStandalone,
     StandaloneKeyConflict,
+    StandaloneProductConflict,
     StandaloneUnavailable,
     NotFound,
     MethodNotAllowed,
@@ -59,12 +60,17 @@ impl IntoResponse for ApiError {
             Self::InvalidStandalone => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_standalone",
-                "Invalid standalone metadata, signature, key or platform",
+                "Invalid standalone product identity, metadata, signature, key or platform",
             ),
             Self::StandaloneKeyConflict => (
                 StatusCode::CONFLICT,
                 "standalone_key_conflict",
                 "Key is already used or pinned by signed artifacts",
+            ),
+            Self::StandaloneProductConflict => (
+                StatusCode::CONFLICT,
+                "standalone_product_conflict",
+                "Product identity is already used or pinned by signed artifacts",
             ),
             Self::StandaloneUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,

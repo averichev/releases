@@ -92,6 +92,7 @@ impl ReleasePublishing {
         let user = authorize(&mut tx, actor).await?;
         let current = DistributionRepository::snapshot_in(&mut tx, app, id).await?;
         if current.application.status != snapshot.application.status
+            || current.application.product_id != snapshot.application.product_id
             || current.application.standalone_public_key
                 != snapshot.application.standalone_public_key
             || current.release != snapshot.release

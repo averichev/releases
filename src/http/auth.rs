@@ -278,6 +278,7 @@ impl From<ServiceError> for ApiError {
         match error {
             ServiceError::InvalidStandalone => Self::InvalidStandalone,
             ServiceError::StandaloneKeyConflict => Self::StandaloneKeyConflict,
+            ServiceError::StandaloneProductConflict => Self::StandaloneProductConflict,
             ServiceError::StandaloneUnavailable => Self::StandaloneUnavailable,
             ServiceError::Invalid => Self::BadRequest,
             ServiceError::Credentials => Self::Credentials,

@@ -13,9 +13,13 @@
 | GET / HEAD | `/{id}/icon` | 200, нормализованный PNG; 404 без иконки |
 | POST | `/{id}/icon` | 200, Application DTO с новым icon_url |
 | DELETE | `/{id}/icon` | 200, Application DTO с icon_url = null |
-| GET | `/{id}/integrations/standalone` | 200, `{application_id,public_key,key_id}`; operator/admin |
-| PUT | `/{id}/integrations/standalone` | 204; `{public_key: string|null}`; admin + CSRF |
+| GET | `/{id}/integrations/standalone` | 200, `{application_id,product_id,public_key,key_id}`; operator/admin |
+| PUT | `/{id}/integrations/standalone` | 204; `{product_id?: string|null, public_key?: string|null}`; admin + CSRF |
 | PUT | `/{id}/releases/{release}/artifacts/{artifact}/standalone` | 200, Artifact DTO; `{signed_metadata: string|null}`; только черновик, admin + CSRF |
+
+Standalone GET сохраняет `application_id` как внутренний UUID записи. Nullable `product_id` — отдельный постоянный UUID издателя, используемый в поле `application_id` JWS v1. Сервер не назначает его при создании приложения. PUT различает отсутствие поля (оставить прежнее), `null` (очистить) и строку (задать); `{}` ничего не меняет. `product_id` и `public_key` можно менять вместе; ошибка любого поля откатывает весь запрос. Старые запросы только с `public_key` совместимы. UUID принимается только в канонической строчной форме с дефисами; неверный — 422 `invalid_standalone`, неверный JSON/тип — 400. Занятый UUID или изменение закреплённого — 409 `standalone_product_conflict`; ключевой конфликт сохраняет 409 `standalone_key_conflict`.
+
+Настройки меняются под BEGIN IMMEDIATE с повторной проверкой живой admin-сессии; пропущенные значения читаются под той же блокировкой. Первая подпись закрепляет `product_id` навсегда, включая черновики и их последующее удаление. На другом сервере тот же UUID допустим. Без `product_id` подписанный upload/назначение отклоняется, обычные неподписанные upload/publish/download продолжают работать. Старые подписанные приложения автоматически сохраняют прежний UUID как `product_id` при миграции 0011; неподписанные получают null.
 
 `id` — постоянный UUID. Физическое удаление приложений отсутствует; DELETE `/{id}` возвращает 405.
 

@@ -55,6 +55,8 @@ impl ApplicationCatalog {
                 .ok_or(ServiceError::InvalidApplication)?,
             icon_key: None,
             standalone_public_key: None,
+            product_id: None,
+            product_id_locked: false,
             visibility: input.visibility,
             status: Status::Active,
             created_at: now,
@@ -162,13 +164,42 @@ impl ApplicationCatalog {
         id: &str,
         key: Option<&str>,
     ) -> Result<()> {
-        if key.is_some_and(|v| !crate::domain::standalone::public_key(v)) {
+        self.set_standalone_settings(actor, id, None, Some(key))
+            .await
+    }
+    /// None leaves a field intact; Some(None) explicitly clears it.
+    pub async fn set_standalone_settings(
+        &self,
+        actor: &Identity,
+        id: &str,
+        product_id: Option<Option<&str>>,
+        key: Option<Option<&str>>,
+    ) -> Result<()> {
+        if key
+            .flatten()
+            .is_some_and(|v| !crate::domain::standalone::public_key(v))
+            || product_id
+                .flatten()
+                .is_some_and(|v| !crate::domain::standalone::product_id(v))
+        {
             return Err(ServiceError::InvalidStandalone);
         }
         let mut tx = self.repository.write().await?;
         Self::authorize(&mut tx, actor).await?;
-        ApplicationsRepository::get_in(&mut tx, id).await?;
-        ApplicationsRepository::set_standalone_key(&mut tx, id, key, secrets::now()).await?;
+        let app = ApplicationsRepository::get_in(&mut tx, id).await?;
+        let product_id = product_id.unwrap_or(app.product_id.as_deref());
+        let key = key.unwrap_or(app.standalone_public_key.as_deref());
+        if app.product_id_locked && product_id != app.product_id.as_deref() {
+            return Err(ServiceError::StandaloneProductConflict);
+        }
+        ApplicationsRepository::set_standalone_settings(
+            &mut tx,
+            id,
+            key,
+            product_id,
+            secrets::now(),
+        )
+        .await?;
         tx.commit().await?;
         Ok(())
     }

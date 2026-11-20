@@ -1,5 +1,5 @@
 //! Bounded JWS profile for standalone executables. Signing happens off-server.
-use super::{artifact::Artifact, release::Release};
+use super::{application::Application, artifact::Artifact, release::Release};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::jwk::{Jwk, ThumbprintHash};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
@@ -12,6 +12,7 @@ pub const MEDIA_TYPE: &str = "releases-standalone+jws";
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
     pub schema_version: u32,
+    /// Publisher's product_id; the v1 wire name is retained for compatibility.
     pub application_id: String,
     pub version: String,
     pub os: String,
@@ -77,19 +78,25 @@ fn deserialize_key_id<'de, D: serde::Deserializer<'de>>(
     String::deserialize(deserializer).map(Some)
 }
 
+pub fn product_id(value: &str) -> bool {
+    uuid::Uuid::parse_str(value).is_ok_and(|id| id.to_string() == value)
+}
+
+/// One source of identity/key selection, with local ownership checked separately.
 pub fn verify(
     jws: &str,
-    key: &str,
-    application_id: &str,
+    application: &Application,
     release: &Release,
     artifact: &Artifact,
 ) -> Option<Metadata> {
+    let product_id = application.product_id.as_deref()?;
+    let key = application.standalone_public_key.as_deref()?;
     if jws.is_empty()
         || jws.len() > MAX_SIGNATURE_BYTES
         || !public_key(key)
         || !compatible(artifact)
         || artifact.release_id != release.id
-        || release.application_id != application_id
+        || release.application_id != application.id
     {
         return None;
     }
@@ -118,7 +125,7 @@ pub fn verify(
     let m = decoded.claims;
     let (os, arch) = artifact.target.split_once('-')?;
     (m.schema_version == 1
-        && m.application_id == application_id
+        && m.application_id == product_id
         && m.version == release.version.to_string()
         && m.os == os
         && m.arch == arch

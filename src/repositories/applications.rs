@@ -16,6 +16,8 @@ struct StoredApplication {
     created_at: i64,
     updated_at: i64,
     standalone_public_key: Option<String>,
+    product_id: Option<String>,
+    product_id_locked: bool,
 }
 impl StoredApplication {
     fn application(self) -> Result<Application> {
@@ -34,6 +36,8 @@ impl StoredApplication {
             created_at: self.created_at,
             updated_at: self.updated_at,
             standalone_public_key: self.standalone_public_key,
+            product_id: self.product_id,
+            product_id_locked: self.product_id_locked,
         })
     }
 }
@@ -149,15 +153,23 @@ impl ApplicationsRepository {
                 .await?,
         )
     }
-    pub async fn set_standalone_key(
+    pub async fn set_standalone_settings(
         c: &mut SqliteConnection,
         id: &str,
         key: Option<&str>,
+        product_id: Option<&str>,
         now: i64,
     ) -> Result<()> {
-        let result = sqlx::query("UPDATE applications SET standalone_public_key=?,updated_at=max(updated_at,?) WHERE id=?")
-            .bind(key).bind(now).bind(id).execute(c).await;
+        let result = sqlx::query("UPDATE applications SET standalone_public_key=?,product_id=?,updated_at=max(updated_at,?) WHERE id=?")
+            .bind(key).bind(product_id).bind(now).bind(id).execute(c).await;
         match result {
+            Err(sqlx::Error::Database(ref e))
+                if e.message() == "standalone_product_locked"
+                    || (e.is_unique_violation()
+                        && e.message().contains("applications.product_id")) =>
+            {
+                Err(ServiceError::StandaloneProductConflict)
+            }
             Err(sqlx::Error::Database(ref e))
                 if e.is_unique_violation() || e.message() == "standalone_key_locked" =>
             {

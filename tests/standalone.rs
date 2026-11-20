@@ -57,9 +57,24 @@ struct TestApp {
     actor: Identity,
     token: String,
     app: String,
+    product: String,
 }
 impl TestApp {
     async fn new() -> Self {
+        let t = Self::unconfigured().await;
+        t.state
+            .applications
+            .set_standalone_settings(
+                &t.actor,
+                &t.app,
+                Some(Some(&t.product)),
+                Some(Some(PUBLIC_KEY)),
+            )
+            .await
+            .unwrap();
+        t
+    }
+    async fn unconfigured() -> Self {
         let dir = tempdir().unwrap();
         let mut config = AppConfig::default();
         config.database.path = dir.path().join("db.sqlite");
@@ -94,11 +109,7 @@ impl TestApp {
             .await
             .unwrap()
             .id;
-        state
-            .applications
-            .set_standalone_key(&actor, &app, Some(PUBLIC_KEY))
-            .await
-            .unwrap();
+        let product = uuid::Uuid::new_v4().to_string();
         let router = http::router(state.clone());
         Self {
             _dir: dir,
@@ -108,6 +119,7 @@ impl TestApp {
             actor,
             token: login.token,
             app,
+            product,
         }
     }
     fn base(&self) -> String {
@@ -162,7 +174,7 @@ impl TestApp {
         if signed {
             upload
                 .set_standalone_signature(
-                    sign(&metadata(&self.app, &r.version.to_string(), target)).as_bytes(),
+                    sign(&metadata(&self.product, &r.version.to_string(), target)).as_bytes(),
                 )
                 .unwrap();
         }
@@ -297,6 +309,703 @@ async fn body(r: Response) -> Value {
 }
 
 #[tokio::test]
+async fn identity_migration_preserves_legacy_published_and_draft_jws_byte_for_byte() {
+    use veruna_releases::repositories::{
+        applications::ApplicationsRepository, artifact::ArtifactsRepository,
+        release::ReleasesRepository,
+    };
+    let dir = tempdir().unwrap();
+    let mut config = AppConfig::default();
+    config.database.path = dir.path().join("legacy.sqlite");
+    config.storage.directory = dir.path().join("objects");
+    config.storage.icons_directory = dir.path().join("icons");
+    let migrations = dir.path().join("legacy-migrations");
+    std::fs::create_dir(&migrations).unwrap();
+    for entry in std::fs::read_dir("migrations").unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_str().unwrap() < "0011" {
+            std::fs::copy(entry.path(), migrations.join(entry.file_name())).unwrap();
+        }
+    }
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&config.database.path)
+            .create_if_missing(true)
+            .foreign_keys(true),
+    )
+    .await
+    .unwrap();
+    sqlx::migrate::Migrator::new(migrations.as_path())
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+    std::fs::create_dir_all(&config.storage.directory).unwrap();
+    let mut legacy = Vec::new();
+    for (index, status, signed) in [
+        (0, "published", true),
+        (1, "draft", true),
+        (2, "published", false),
+    ] {
+        let app = uuid::Uuid::new_v4().to_string();
+        let release = uuid::Uuid::new_v4().to_string();
+        let artifact = uuid::Uuid::new_v4().to_string();
+        let storage_key = format!("{}.blob", uuid::Uuid::new_v4().simple());
+        let seed = [index + 1; 32];
+        let key = URL_SAFE_NO_PAD.encode(
+            ed25519_dalek::SigningKey::from_bytes(&seed)
+                .verifying_key()
+                .as_bytes(),
+        );
+        let mut header = Header::new(Algorithm::EdDSA);
+        header.typ = Some(standalone::MEDIA_TYPE.into());
+        if index == 1 {
+            header.kid = standalone::key_id(&key);
+        }
+        let signature =
+            signed.then(|| sign_header(&metadata(&app, "0.5.0", "windows-x86_64"), &header, &seed));
+        sqlx::query("INSERT INTO applications(id,slug,name,name_search,visibility,standalone_public_key) VALUES(?,?,'Legacy','legacy','public',?)")
+            .bind(&app).bind(format!("legacy-{index}")).bind(&key).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO releases(id,application_id,version,version_key,status,created_at,updated_at,published_at) VALUES(?,?,'0.5.0','0.5.0',?,1,1,?)")
+            .bind(&release).bind(&app).bind(status).bind((status == "published").then_some(1_i64)).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,standalone_signature) VALUES(?,?,'product.exe','windows-x86_64','exe',?,?,?,?,?)")
+            .bind(&artifact).bind(&release).bind(CONTENT.len() as i64).bind(format!("{:x}", Sha256::digest(CONTENT))).bind(&storage_key).bind(1_i64).bind(&signature).execute(&pool).await.unwrap();
+        std::fs::write(config.storage.directory.join(&storage_key), CONTENT).unwrap();
+        legacy.push((app, release, artifact, storage_key, key, signature));
+    }
+    let apps_before: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id,slug,standalone_public_key FROM applications ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    // Existing repository models do not require the new columns on releases/artifacts.
+    let mut original = Vec::new();
+    for (app, release, artifact, _, _, _) in &legacy {
+        original.push((
+            ReleasesRepository::new(pool.clone())
+                .get(app, release)
+                .await
+                .unwrap(),
+            ArtifactsRepository::new(pool.clone())
+                .get(app, release, artifact)
+                .await
+                .unwrap(),
+        ));
+    }
+    pool.close().await;
+    let pool = initialize(&config).await.unwrap();
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id,slug,standalone_public_key FROM applications ORDER BY id"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap(),
+        apps_before
+    );
+    for ((app, release, artifact, storage_key, key, signature), (old_release, old_artifact)) in
+        legacy.iter().zip(&original)
+    {
+        let p = ApplicationsRepository::new(pool.clone())
+            .get(app)
+            .await
+            .unwrap();
+        let r = ReleasesRepository::new(pool.clone())
+            .get(app, release)
+            .await
+            .unwrap();
+        let a = ArtifactsRepository::new(pool.clone())
+            .get(app, release, artifact)
+            .await
+            .unwrap();
+        assert_eq!(&r, old_release);
+        assert_eq!(&a, old_artifact);
+        assert_eq!(
+            p.product_id.as_deref(),
+            signature.as_ref().map(|_| app.as_str())
+        );
+        assert_eq!(p.product_id_locked, signature.is_some());
+        assert_eq!(p.standalone_public_key.as_deref(), Some(key.as_str()));
+        assert_eq!(
+            std::fs::read(config.storage.directory.join(storage_key)).unwrap(),
+            CONTENT
+        );
+        if let Some(signature) = signature {
+            assert_eq!(
+                a.standalone_signature.as_ref().unwrap().as_bytes(),
+                signature.as_bytes()
+            );
+            assert!(standalone::verify(signature, &p, &r, &a).is_some());
+            assert!(
+                sqlx::query("UPDATE applications SET product_id=NULL WHERE id=?")
+                    .bind(app)
+                    .execute(&pool)
+                    .await
+                    .is_err()
+            );
+        }
+    }
+    let state = application_state(pool.clone(), &config).await.unwrap();
+    let update = state
+        .standalone_updater
+        .update("legacy-0", "windows-x86_64", "0.4.0")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        update.signed_metadata.as_bytes(),
+        legacy[0].5.as_ref().unwrap().as_bytes()
+    );
+    assert!(
+        state
+            .standalone_updater
+            .update("legacy-1", "windows-x86_64", "0.4.0")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        state
+            .standalone_updater
+            .update("legacy-2", "windows-x86_64", "0.4.0")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    pool.close().await;
+    // SQLx checksums and identity pinning also survive a second startup.
+    let pool = initialize(&config).await.unwrap();
+    assert_eq!(
+        ApplicationsRepository::new(pool.clone())
+            .get(&legacy[0].0)
+            .await
+            .unwrap()
+            .product_id
+            .as_deref(),
+        Some(legacy[0].0.as_str())
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn publisher_signature_works_on_two_independent_servers() {
+    // Build/sign before either server exists. Neither local ID is known to the signer.
+    let product = uuid::Uuid::new_v4().to_string();
+    let mut seed = [0_u8; 32];
+    getrandom::fill(&mut seed).unwrap();
+    let public_key = URL_SAFE_NO_PAD.encode(
+        ed25519_dalek::SigningKey::from_bytes(&seed)
+            .verifying_key()
+            .as_bytes(),
+    );
+    let mut header = Header::new(Algorithm::EdDSA);
+    header.typ = Some(standalone::MEDIA_TYPE.into());
+    header.kid = standalone::key_id(&public_key);
+    let signature = sign_header(
+        &metadata(&product, "1.2.3", "windows-x86_64"),
+        &header,
+        &seed,
+    );
+    let a = TestApp::unconfigured().await;
+    let b = TestApp::unconfigured().await;
+    assert_ne!(a.app, b.app);
+    for t in [&a, &b] {
+        assert_ne!(t.app, product);
+        let settings = format!("{}/integrations/standalone", t.base());
+        assert_eq!(
+            t.admin(
+                "PUT",
+                &settings,
+                json!({"product_id":product,"public_key":public_key}),
+                Some(&t.token),
+                true
+            )
+            .await
+            .status(),
+            204
+        );
+        let r = t.create("1.2.3").await;
+        // Matching a server's internal ID must no longer be sufficient.
+        assert_eq!(
+            t.multipart(
+                &r,
+                "windows-x86_64",
+                Some(&sign_header(
+                    &metadata(&t.app, "1.2.3", "windows-x86_64"),
+                    &header,
+                    &seed
+                )),
+                false
+            )
+            .await
+            .status(),
+            422
+        );
+        assert_eq!(
+            t.multipart(&r, "windows-x86_64", Some(&signature), false)
+                .await
+                .status(),
+            201
+        );
+        t.publish(&r).await.unwrap();
+        let response = t.update("windows-x86_64", "1.0.0").await;
+        assert_eq!(response.status(), 200);
+        let update = body(response).await;
+        assert_eq!(
+            update["signed_metadata"].as_str().unwrap().as_bytes(),
+            signature.as_bytes()
+        );
+        let path = url::Url::parse(update["url"].as_str().unwrap()).unwrap();
+        let download = t.get(path.path()).await;
+        assert_eq!(download.status(), 200);
+        assert_eq!(
+            download.into_body().collect().await.unwrap().to_bytes(),
+            CONTENT
+        );
+        let app = t.state.applications.get(&t.app).await.unwrap();
+        let artifact = t
+            .state
+            .artifacts
+            .list(&t.app, &r.id)
+            .await
+            .unwrap()
+            .remove(0);
+        assert!(standalone::verify(&signature, &app, &r, &artifact).is_some());
+        let mut wrong_owner = r.clone();
+        wrong_owner.application_id = uuid::Uuid::new_v4().to_string();
+        assert!(standalone::verify(&signature, &app, &wrong_owner, &artifact).is_none());
+    }
+}
+
+#[tokio::test]
+async fn identity_settings_distinguish_missing_null_and_value_and_roll_back_together() {
+    let t = TestApp::unconfigured().await;
+    let settings = format!("{}/integrations/standalone", t.base());
+    let read = || t.admin("GET", &settings, Value::Null, Some(&t.token), true);
+    let initial = body(read().await).await;
+    assert_eq!(initial["application_id"], t.app);
+    assert!(initial["product_id"].is_null());
+    assert!(initial["public_key"].is_null());
+    for invalid in [
+        "",
+        "bad",
+        "E81A5470-8414-40A1-8596-71BF674F4568",
+        "e81a5470841440a1859671bf674f4568",
+        " e81a5470-8414-40a1-8596-71bf674f4568",
+    ] {
+        assert_eq!(
+            t.admin(
+                "PUT",
+                &settings,
+                json!({"product_id":invalid,"public_key":PUBLIC_KEY}),
+                Some(&t.token),
+                true
+            )
+            .await
+            .status(),
+            422
+        );
+        assert!(
+            sqlx::query("UPDATE applications SET product_id=? WHERE id=?")
+                .bind(invalid)
+                .bind(&t.app)
+                .execute(&t.state.database)
+                .await
+                .is_err()
+        );
+    }
+    for invalid in [json!({"product_id":123}), json!({"extra":true})] {
+        assert_eq!(
+            t.admin("PUT", &settings, invalid, Some(&t.token), true)
+                .await
+                .status(),
+            400
+        );
+    }
+    // Existing key-only clients retain their contract.
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &settings,
+            json!({"public_key":PUBLIC_KEY}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        204
+    );
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &settings,
+            json!({"product_id":t.product}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        204
+    );
+    let configured = body(read().await).await;
+    assert_eq!(configured["product_id"], t.product);
+    assert_eq!(configured["public_key"], PUBLIC_KEY);
+    assert_eq!(
+        configured["key_id"],
+        standalone::key_id(PUBLIC_KEY).unwrap()
+    );
+    assert_eq!(
+        t.admin("PUT", &settings, json!({}), Some(&t.token), true)
+            .await
+            .status(),
+        204
+    );
+    assert_eq!(body(read().await).await, configured);
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &settings,
+            json!({"public_key":null}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        204
+    );
+    assert_eq!(body(read().await).await["product_id"], t.product);
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &settings,
+            json!({"product_id":null,"public_key":PUBLIC_KEY}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        204
+    );
+    let current = body(read().await).await;
+    assert!(current["product_id"].is_null());
+    assert_eq!(current["public_key"], PUBLIC_KEY);
+    // A conflict in one field must roll back the other field too.
+    let other = t
+        .state
+        .applications
+        .create(
+            &t.actor,
+            NewApplication {
+                slug: "other".into(),
+                name: "Other".into(),
+                description: String::new(),
+                visibility: Visibility::Public,
+            },
+        )
+        .await
+        .unwrap();
+    t.state
+        .applications
+        .set_standalone_settings(&t.actor, &other.id, Some(Some(&t.product)), None)
+        .await
+        .unwrap();
+    t.state
+        .applications
+        .set_status(&t.actor, &other.id, Status::Archived)
+        .await
+        .unwrap();
+    let response = t
+        .admin(
+            "PUT",
+            &settings,
+            json!({"product_id":t.product,"public_key":null}),
+            Some(&t.token),
+            true,
+        )
+        .await;
+    assert_eq!(response.status(), 409);
+    assert_eq!(
+        body(response).await["error"]["code"],
+        "standalone_product_conflict"
+    );
+    assert_eq!(body(read().await).await, current);
+    assert!(
+        sqlx::query("UPDATE applications SET product_id=? WHERE id=?")
+            .bind(&t.product)
+            .bind(&t.app)
+            .execute(&t.state.database)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn unsigned_distribution_needs_no_identity_but_first_signature_requires_it() {
+    let t = TestApp::unconfigured().await;
+    t.state
+        .applications
+        .set_standalone_key(&t.actor, &t.app, Some(PUBLIC_KEY))
+        .await
+        .unwrap();
+    let r = t.create("0.5.0").await;
+    let signature = sign(&metadata(&t.product, "0.5.0", "windows-x86_64"));
+    assert_eq!(
+        t.multipart(&r, "windows-x86_64", Some(&signature), false)
+            .await
+            .status(),
+        422
+    );
+    let a = t.upload(&r, "windows-x86_64", false).await;
+    assert!(matches!(
+        t.state
+            .artifacts
+            .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(&signature))
+            .await,
+        Err(ServiceError::InvalidStandalone)
+    ));
+    assert!(
+        sqlx::query("UPDATE artifacts SET standalone_signature=? WHERE id=?")
+            .bind(&signature)
+            .bind(&a.id)
+            .execute(&t.state.database)
+            .await
+            .is_err()
+    );
+    t.publish(&r).await.unwrap();
+    assert_eq!(t.update("windows-x86_64", "0.1.0").await.status(), 204);
+    let download = t
+        .get(&t.state.distribution.artifact_path("product", &r, &a))
+        .await;
+    assert_eq!(download.status(), 200);
+    assert_eq!(
+        download.into_body().collect().await.unwrap().to_bytes(),
+        CONTENT
+    );
+    // Unconfigured identity also forbids signed additions to a published release.
+    assert_eq!(
+        t.multipart(
+            &r,
+            "linux-x86_64",
+            Some(&sign(&metadata(&t.product, "0.5.0", "linux-x86_64"))),
+            false
+        )
+        .await
+        .status(),
+        422
+    );
+    assert!(
+        t.state
+            .applications
+            .get(&t.app)
+            .await
+            .unwrap()
+            .product_id
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn first_signature_permanently_pins_identity_in_service_and_sqlite() {
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    let a = t.upload(&r, "windows-x86_64", true).await;
+    let next = uuid::Uuid::new_v4().to_string();
+    for published in [false, true] {
+        if published {
+            t.publish(&r).await.unwrap();
+        }
+        let response = t
+            .admin(
+                "PUT",
+                &format!("{}/integrations/standalone", t.base()),
+                json!({"product_id":next}),
+                Some(&t.token),
+                true,
+            )
+            .await;
+        assert_eq!(response.status(), 409);
+        assert_eq!(
+            body(response).await["error"]["code"],
+            "standalone_product_conflict"
+        );
+        for product in [None, Some(next.as_str())] {
+            assert!(matches!(
+                t.state
+                    .applications
+                    .set_standalone_settings(&t.actor, &t.app, Some(product), None)
+                    .await,
+                Err(ServiceError::StandaloneProductConflict)
+            ));
+            assert!(
+                sqlx::query("UPDATE applications SET product_id=? WHERE id=?")
+                    .bind(product)
+                    .bind(&t.app)
+                    .execute(&t.state.database)
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(
+            sqlx::query("UPDATE applications SET product_id_locked=0,product_id=? WHERE id=?")
+                .bind(&next)
+                .bind(&t.app)
+                .execute(&t.state.database)
+                .await
+                .is_err()
+        );
+        t.state
+            .applications
+            .set_standalone_settings(&t.actor, &t.app, Some(Some(&t.product)), None)
+            .await
+            .unwrap();
+    }
+    assert_eq!(t.state.artifacts.list(&t.app, &r.id).await.unwrap()[0], a);
+    // Also cover an app whose only signed draft is removed.
+    let only_draft = TestApp::new().await;
+    let r = only_draft.create("0.5.0").await;
+    let a = only_draft.upload(&r, "windows-x86_64", false).await;
+    let signature = sign(&metadata(&only_draft.product, "0.5.0", "windows-x86_64"));
+    only_draft
+        .state
+        .artifacts
+        .set_standalone(
+            &only_draft.actor,
+            &only_draft.app,
+            &r.id,
+            &a.id,
+            Some(&signature),
+        )
+        .await
+        .unwrap();
+    only_draft
+        .state
+        .artifacts
+        .set_standalone(&only_draft.actor, &only_draft.app, &r.id, &a.id, None)
+        .await
+        .unwrap();
+    only_draft
+        .state
+        .releases
+        .delete(&only_draft.actor, &only_draft.app, &r.id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        only_draft
+            .state
+            .applications
+            .set_standalone_settings(&only_draft.actor, &only_draft.app, Some(None), None)
+            .await,
+        Err(ServiceError::StandaloneProductConflict)
+    ));
+    assert!(sqlx::query("INSERT OR REPLACE INTO applications(id,slug,name,name_search) VALUES(?,'product','Product','product')")
+        .bind(&only_draft.app).execute(&only_draft.state.database).await.is_err());
+}
+
+#[tokio::test]
+async fn concurrent_settings_preserve_omitted_fields_and_serialize_first_signature() {
+    let t = TestApp::unconfigured().await;
+    let settings = format!("{}/integrations/standalone", t.base());
+    let (identity, key) = tokio::join!(
+        t.admin(
+            "PUT",
+            &settings,
+            json!({"product_id":t.product}),
+            Some(&t.token),
+            true
+        ),
+        t.admin(
+            "PUT",
+            &settings,
+            json!({"public_key":PUBLIC_KEY}),
+            Some(&t.token),
+            true
+        )
+    );
+    assert_eq!(identity.status(), 204);
+    assert_eq!(key.status(), 204);
+    let app = t.state.applications.get(&t.app).await.unwrap();
+    assert_eq!(app.product_id.as_deref(), Some(t.product.as_str()));
+    assert_eq!(app.standalone_public_key.as_deref(), Some(PUBLIC_KEY));
+    let other = t
+        .state
+        .applications
+        .create(
+            &t.actor,
+            NewApplication {
+                slug: "other".into(),
+                name: "Other".into(),
+                description: String::new(),
+                visibility: Visibility::Public,
+            },
+        )
+        .await
+        .unwrap();
+    let shared = uuid::Uuid::new_v4().to_string();
+    let (one, two) = tokio::join!(
+        t.state
+            .applications
+            .set_standalone_settings(&t.actor, &t.app, Some(Some(&shared)), None),
+        t.state.applications.set_standalone_settings(
+            &t.actor,
+            &other.id,
+            Some(Some(&shared)),
+            None
+        )
+    );
+    assert!(matches!(
+        (&one, &two),
+        (Ok(()), Err(ServiceError::StandaloneProductConflict))
+            | (Err(ServiceError::StandaloneProductConflict), Ok(()))
+    ));
+    t.state
+        .applications
+        .set_standalone_settings(&t.actor, &t.app, Some(Some(&t.product)), None)
+        .await
+        .unwrap();
+    let r = t.create("0.5.0").await;
+    let mut upload = t.begin(&r, "windows-x86_64").await;
+    upload.write(CONTENT).await.unwrap();
+    upload
+        .set_standalone_signature(sign(&metadata(&t.product, "0.5.0", "windows-x86_64")).as_bytes())
+        .unwrap();
+    let next = uuid::Uuid::new_v4().to_string();
+    let (signed, changed) = tokio::join!(
+        t.state.artifacts.complete(&t.actor, upload),
+        t.state
+            .applications
+            .set_standalone_settings(&t.actor, &t.app, Some(Some(&next)), None)
+    );
+    let app = t.state.applications.get(&t.app).await.unwrap();
+    match (signed, changed) {
+        (Ok(_), Err(ServiceError::StandaloneProductConflict)) => {
+            assert_eq!(app.product_id.as_deref(), Some(t.product.as_str()));
+            assert!(app.product_id_locked);
+        }
+        (Err(ServiceError::InvalidStandalone), Ok(())) => {
+            assert_eq!(app.product_id.as_deref(), Some(next.as_str()));
+            assert!(!app.product_id_locked);
+            assert!(
+                t.state
+                    .artifacts
+                    .list(&t.app, &r.id)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        other => panic!("Unexpected identity/upload race: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn three_signed_installers_sparse_platforms_semver_and_manifest_remain_compatible() {
     let t = TestApp::new().await;
     let old = t.create("0.5.0+ci.7").await;
@@ -305,7 +1014,7 @@ async fn three_signed_installers_sparse_platforms_semver_and_manifest_remain_com
             .multipart(
                 &old,
                 target,
-                Some(&sign(&metadata(&t.app, "0.5.0+ci.7", target))),
+                Some(&sign(&metadata(&t.product, "0.5.0+ci.7", target))),
                 false,
             )
             .await;
@@ -376,7 +1085,7 @@ async fn three_signed_installers_sparse_platforms_semver_and_manifest_remain_com
             .to_bytes();
         assert_eq!(bytes.as_ref(), CONTENT);
         let signature = dto["signed_metadata"].as_str().unwrap();
-        assert_eq!(signature, sign(&metadata(&t.app, version, target)));
+        assert_eq!(signature, sign(&metadata(&t.product, version, target)));
     }
     for version in ["0.5.0", "0.5.0+other", "0.6.0", "99.0.0"] {
         assert_eq!(t.update("windows-x86_64", version).await.status(), 204);
@@ -416,7 +1125,7 @@ async fn signed_claims_and_jose_profile_are_verified_and_invalid_uploads_are_ato
     let t = TestApp::new().await;
     let r = t.create("0.5.0").await;
     let target = "windows-x86_64";
-    let valid = metadata(&t.app, "0.5.0", target);
+    let valid = metadata(&t.product, "0.5.0", target);
     for (field, value) in [
         ("schema_version", json!(2)),
         ("application_id", json!(uuid::Uuid::new_v4().to_string())),
@@ -581,9 +1290,10 @@ async fn api_parameters_privacy_admin_csrf_and_live_authorization() {
     );
     for (path, payload) in [
         (&settings, json!({"public_key":PUBLIC_KEY})),
+        (&settings, json!({"product_id":t.product})),
         (
             &artifact,
-            json!({"signed_metadata":sign(&metadata(&t.app,"0.5.0","windows-x86_64"))}),
+            json!({"signed_metadata":sign(&metadata(&t.product,"0.5.0","windows-x86_64"))}),
         ),
     ] {
         assert_eq!(
@@ -659,7 +1369,7 @@ async fn api_parameters_privacy_admin_csrf_and_live_authorization() {
         t.admin(
             "PUT",
             &artifact,
-            json!({"signed_metadata":sign(&metadata(&t.app,"0.5.0","windows-x86_64"))}),
+            json!({"signed_metadata":sign(&metadata(&t.product,"0.5.0","windows-x86_64"))}),
             Some(&t.token),
             true
         )
@@ -848,7 +1558,7 @@ async fn integrity_publication_rollback_and_missing_file_block_instead_of_fallin
 async fn interrupted_upload_append_failure_and_concurrent_version_changes_reclaim_files() {
     let t = TestApp::new().await;
     let r = t.create("0.5.0").await;
-    let jws = sign(&metadata(&t.app, "0.5.0", "windows-x86_64"));
+    let jws = sign(&metadata(&t.product, "0.5.0", "windows-x86_64"));
     assert_eq!(
         t.multipart(&r, "windows-x86_64", Some(&jws), true)
             .await
@@ -889,7 +1599,7 @@ async fn interrupted_upload_append_failure_and_concurrent_version_changes_reclai
         t.multipart(
             &current,
             "windows-x86_64",
-            Some(&sign(&metadata(&t.app, "0.6.0", "windows-x86_64"))),
+            Some(&sign(&metadata(&t.product, "0.6.0", "windows-x86_64"))),
             false
         )
         .await
@@ -906,7 +1616,7 @@ async fn interrupted_upload_append_failure_and_concurrent_version_changes_reclai
         t.multipart(
             &current,
             "windows-x86_64",
-            Some(&sign(&metadata(&t.app, "0.6.0", "windows-x86_64"))),
+            Some(&sign(&metadata(&t.product, "0.6.0", "windows-x86_64"))),
             false
         )
         .await
@@ -972,7 +1682,9 @@ async fn signed_draft_changes_stale_publish_and_concurrent_append_preserve_invar
     for upload in [&mut one, &mut two] {
         upload.write(CONTENT).await.unwrap();
         upload
-            .set_standalone_signature(sign(&metadata(&t.app, "0.5.0", "linux-x86_64")).as_bytes())
+            .set_standalone_signature(
+                sign(&metadata(&t.product, "0.5.0", "linux-x86_64")).as_bytes(),
+            )
             .unwrap();
     }
     let (one, two) = tokio::join!(
@@ -1043,7 +1755,7 @@ async fn offline_documented_example_interoperates_with_server_and_rejects_tamper
         .arg(&script)
         .arg("sign")
         .arg(prefix.with_extension("pem"))
-        .arg(&t.app)
+        .arg(&t.product)
         .args(["0.5.0", "windows-x86_64"])
         .arg(&file)
         .output()
@@ -1072,7 +1784,7 @@ async fn offline_documented_example_interoperates_with_server_and_rejects_tamper
         .arg(&script)
         .arg("sign")
         .arg(prefix.with_extension("pem"))
-        .arg(&t.app)
+        .arg(&t.product)
         .args(["0.5.0", "windows-x86_64"])
         .arg(&file)
         .arg("--kid")
@@ -1123,7 +1835,7 @@ async fn offline_documented_example_interoperates_with_server_and_rejects_tamper
             .arg(&script)
             .arg("verify")
             .arg(prefix.with_extension("public.jwk"))
-            .arg(&t.app)
+            .arg(&t.product)
             .args(["0.5.0", "windows-x86_64"])
             .arg(&file)
             .arg(&jws_file)
@@ -1188,7 +1900,7 @@ async fn optional_key_id_is_bound_to_trusted_key_and_legacy_signatures_still_wor
     )
     .await;
     assert_eq!(settings["key_id"], kid);
-    let payload = metadata(&t.app, "0.5.0", "windows-x86_64");
+    let payload = metadata(&t.product, "0.5.0", "windows-x86_64");
     let mut header = Header::new(Algorithm::EdDSA);
     header.typ = Some(standalone::MEDIA_TYPE.into());
     for invalid in ["", "unknown-key", "https://untrusted.invalid/key.jwk"] {

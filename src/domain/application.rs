@@ -11,6 +11,8 @@ pub struct Application {
     pub created_at: i64,
     pub updated_at: i64,
     pub standalone_public_key: Option<String>,
+    pub product_id: Option<String>,
+    pub product_id_locked: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

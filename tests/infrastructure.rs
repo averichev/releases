@@ -58,7 +58,7 @@ async fn creates_configured_paths_and_applies_baseline_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(migrations, 10);
+    assert_eq!(migrations, 11);
     pool.close().await;
 }
 
@@ -123,7 +123,7 @@ async fn catalog_migration_preserves_an_existing_identity_database() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        10
+        11
     );
 }
 
@@ -377,7 +377,7 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
             .fetch_one(&pool)
             .await
             .unwrap(),
-        10
+        11
     );
     pool.close().await;
 }
