@@ -4,6 +4,7 @@
 
 | URL | Результат |
 | --- | --- |
+| `/` | Список active/public приложений с опубликованными релизами; название и логотип ведут на `/{slug}` |
 | `/{slug}` | Страница актуальных установщиков каждой платформы и истории |
 | `/{slug}/latest` | 307 на страницу выбора |
 | `/{slug}/latest/windows-x86_64` | Максимальный опубликованный SemVer с installer для Windows x64 |
@@ -16,6 +17,7 @@
 | `/{slug}/{version}/{target}?purpose=updater` | Явный выбор updater конкретной версии |
 | `/{slug}/releases/{version}/artifacts/{uuid}/download` | Постоянная ссылка на конкретный файл |
 | `/{slug}/manifest.json?limit=20` | Манифест schema_version=2 |
+| `/api/v1/public/applications?limit=20&offset=0` | items (name, slug, icon_url), total, limit, offset; по алфавиту, только active/public с published-релизами |
 | `/api/v1/public/applications/{slug}` | name, description, slug, icon_url, latest_by_target |
 | `/api/v1/public/applications/{slug}/releases?limit=20&offset=0` | items, total, limit, offset; опубликованная история по SemVer |
 | `/api/v1/public/applications/{slug}/icon` | Иконка приложения |

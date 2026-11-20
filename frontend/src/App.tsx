@@ -5,7 +5,7 @@ import {
 import {
   DashboardOutlined, MenuOutlined, SafetyCertificateOutlined, UserOutlined,
 } from '@ant-design/icons';
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, RequireSession, useAuth } from './auth/Auth';
 import Login from './pages/Login';
 import Activate from './pages/Activate';
@@ -15,6 +15,7 @@ import { ServiceVersion } from './components/ServiceVersion';
 
 const { Title, Paragraph } = Typography;
 const PublicApplication = lazy(() => import('./pages/PublicApplication'));
+const PublicApplications = lazy(() => import('./pages/PublicApplications'));
 const Users = lazy(() => import('./pages/Users'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Overview = lazy(() => import('./pages/Overview'));
@@ -70,8 +71,8 @@ function Placeholder({ title, description }: { title: string; description: strin
 
 export function AppRoutes() {
   return <Routes>
+    <Route path="/" element={<Suspense fallback={<Spin />}><PublicApplications /></Suspense>} />
     <Route element={<AuthProvider><Outlet /></AuthProvider>}>
-    <Route path="/" element={<Navigate to="/admin" replace />} />
     <Route path="/admin/login" element={<Login />} />
     <Route path="/admin/activate" element={<Activate />} />
     <Route element={<RequireSession />}>

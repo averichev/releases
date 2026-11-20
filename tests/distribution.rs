@@ -188,6 +188,138 @@ async fn bytes(r: Response) -> Vec<u8> {
 async fn json_body(r: Response) -> Value {
     serde_json::from_slice(&bytes(r).await).unwrap()
 }
+
+#[tokio::test]
+async fn public_applications_catalog_requires_public_active_and_published() {
+    let mut t = TestApp::new(DeliveryMode::Direct).await;
+    let path = "/api/v1/public/applications";
+    assert_eq!(json_body(t.get("GET", path, &[]).await).await["total"], 0);
+    let draft = t.create("1.0.0").await;
+    t.upload(&draft, "windows-x86_64", "setup.exe").await;
+    assert_eq!(json_body(t.get("GET", path, &[]).await).await["total"], 0);
+    t.publish(&draft).await;
+    // Multiple published versions still produce one application.
+    let second = t.create("2.0.0-rc.1").await;
+    t.upload(&second, "windows-x86_64", "setup.exe").await;
+    t.publish(&second).await;
+    let response = t
+        .get("GET", path, &[("origin", "https://client.example")])
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    assert_eq!(
+        json_body(response).await,
+        json!({
+            "items": [{"name": "Приложение", "slug": "product", "icon_url": null}],
+            "total": 1, "limit": 20, "offset": 0,
+        })
+    );
+    let original = t.app.clone();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(2, 2)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    t.state
+        .applications
+        .set_icon(&t.actor, &original, Some(png.into_inner()))
+        .await
+        .unwrap();
+    let with_icon = json_body(t.get("GET", path, &[]).await).await;
+    let icon = with_icon["items"][0]["icon_url"].as_str().unwrap();
+    let response = t.get("GET", icon, &[]).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/png");
+    // A second app with only a published prerelease belongs in the catalog too.
+    t.app = t
+        .state
+        .applications
+        .create(
+            &t.actor,
+            NewApplication {
+                slug: "alpha".into(),
+                name: "Alpha".into(),
+                description: String::new(),
+                visibility: Visibility::Public,
+            },
+        )
+        .await
+        .unwrap()
+        .id;
+    let preview = t.create("0.1.0-beta.1").await;
+    t.upload(&preview, "windows-x86_64", "preview.exe").await;
+    t.publish(&preview).await;
+    let first = json_body(t.get("GET", &format!("{path}?limit=1"), &[]).await).await;
+    assert_eq!(first["total"], 2);
+    assert_eq!(first["items"][0]["slug"], "alpha");
+    let next = json_body(t.get("GET", &format!("{path}?limit=1&offset=1"), &[]).await).await;
+    assert_eq!(next["items"].as_array().unwrap().len(), 1);
+    assert_eq!(next["items"][0]["slug"], "product");
+    assert_eq!(next["offset"], 1);
+    t.state
+        .applications
+        .update(
+            &t.actor,
+            &original,
+            ApplicationChanges {
+                visibility: Some(Visibility::Private),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let hidden = json_body(t.get("GET", path, &[]).await).await;
+    assert_eq!(hidden["total"], 1);
+    assert_eq!(hidden["items"][0]["slug"], "alpha");
+    t.state
+        .applications
+        .update(
+            &t.actor,
+            &original,
+            ApplicationChanges {
+                visibility: Some(Visibility::Public),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    t.state
+        .applications
+        .set_status(&t.actor, &original, Status::Archived)
+        .await
+        .unwrap();
+    assert_eq!(json_body(t.get("GET", path, &[]).await).await["total"], 1);
+    let head = t.get("HEAD", path, &[]).await;
+    assert_eq!(head.status(), StatusCode::OK);
+    assert!(bytes(head).await.is_empty());
+}
+
+#[tokio::test]
+async fn public_applications_catalog_validates_pagination_and_methods() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    for query in [
+        "limit=0",
+        "limit=101",
+        "offset=100001",
+        "offset=-1",
+        "limit=text",
+        "visibility=private",
+    ] {
+        assert_eq!(
+            t.get("GET", &format!("/api/v1/public/applications?{query}"), &[])
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "{query}"
+        );
+    }
+    assert_eq!(
+        t.get("POST", "/api/v1/public/applications", &[])
+            .await
+            .status(),
+        StatusCode::METHOD_NOT_ALLOWED
+    );
+}
 fn signature() -> String {
     use base64::{Engine, engine::general_purpose::STANDARD};
     let mut packet = [0; 74];

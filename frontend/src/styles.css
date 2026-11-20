@@ -181,6 +181,11 @@ a { color: #236b54; }
 .public-selectors label { display: flex; flex-direction: column; gap: 8px; }
 .public-selectors .ant-select { width: 100%; }
 .public-footer { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 14px; color: #687570; }
+.public-catalog .ant-list-item { padding: 0; }
+.public-application-link { display: flex; align-items: center; gap: 20px; width: 100%; min-width: 0; padding: 20px 0; color: inherit; border-radius: 6px; }
+.public-application-link h2.ant-typography { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.public-application-link:hover h2 { color: var(--ant-color-primary, #236b54); }
+.public-application-link:focus-visible { outline: 2px solid var(--ant-color-primary, #236b54); outline-offset: 4px; }
 .distribution-url { overflow-wrap: anywhere; }
 @media (max-width: 600px) { .public-content { width: calc(100% - 32px); margin: 28px auto; gap: 20px; } .public-hero { gap: 16px; flex-direction: column; } .public-selectors { grid-template-columns: 1fr; gap: 16px; } .public-header { padding: 0 16px; } .public-content .ant-card-head { flex-wrap: wrap; } }
 

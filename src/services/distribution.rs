@@ -2,7 +2,7 @@
 use crate::{
     config::DownloadConfig,
     domain::{
-        application::{Application, Status, Visibility, valid_slug},
+        application::{Application, ApplicationPage, Status, Visibility, valid_slug},
         artifact::Artifact,
         release::{Release, ReleaseStatus},
     },
@@ -115,6 +115,12 @@ impl PublicDistribution {
             storage,
             config,
         }
+    }
+    pub async fn applications(&self, limit: u32, offset: u32) -> Result<ApplicationPage> {
+        if !(1..=100).contains(&limit) || offset > 100_000 {
+            return Err(ServiceError::Invalid);
+        }
+        self.repository.applications(limit, offset).await
     }
     pub async fn application(&self, key: &str, public: bool) -> Result<Application> {
         if public && !valid_slug(key) {

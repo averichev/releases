@@ -354,6 +354,8 @@ Standalone-приложения могут использовать один и 
 
 Сделайте приложение active/public, загрузите файлы в черновик и опубликуйте. В **Распространение** доступны готовые ссылки каждой платформы, копирование и диагностика HEAD. Публичная страница показывает актуальные установщики и историю без авторизации.
 
+Главная `/` показывает список active/public приложений хотя бы с одним опубликованным релизом, по алфавиту. Название и логотип ведут на `/{slug}`; логотип сервиса возвращает в каталог. Приложения без публикаций, private и archived в список не попадают. Каталог доступен без сессии через `GET /api/v1/public/applications?limit=20&offset=0`; ответ содержит `items` (name, slug, icon_url), `total`, `limit`, `offset`. Limit — 1–100, offset — 0–100000. Панель управления доступна по `/admin`.
+
 ```sh
 curl -I 'https://apps.veruna.systems/product/latest/windows-x86_64?format=msi'
 curl -fL 'https://apps.veruna.systems/product/latest/linux-x86_64?format=deb' -o product.deb

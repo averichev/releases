@@ -230,6 +230,9 @@ def main():
             call(published_path + "/publish", "POST", {"expected_release_revision": ready["release_revision"]}, recovered["csrf_token"])
             current_release, _ = call(published_path)
             assert current_release["status"] == "published"
+            catalog, catalog_headers = call("/api/v1/public/applications", opener=build_opener())
+            assert catalog["total"] == 1 and catalog["items"][0]["slug"] == "catalog-smoke"
+            assert catalog_headers["Cache-Control"] == "no-store"
             manifest, manifest_headers = call("/catalog-smoke/manifest.json", opener=build_opener())
             assert manifest["schema_version"] == 2 and manifest["releases"][0]["version"] == "2.0.0" and "ETag" in manifest_headers
             download_url = manifest["releases"][0]["artifacts"][0]["download_url"]

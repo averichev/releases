@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 
 pub fn api_router() -> Router<AppState> {
     Router::new()
+        .route("/public/applications", get(applications))
         .route("/public/applications/{slug}", get(application))
         .route("/public/applications/{slug}/releases", get(history))
         .route("/public/applications/{slug}/icon", get(icon))
@@ -161,6 +162,23 @@ struct CatalogQuery {
 }
 fn artifact_dto(d: &PublicDistribution, slug: &str, r: &Release, a: &Artifact) -> Value {
     json!({"id":a.id,"filename":a.filename,"target":a.target,"format":a.file_type,"purpose":a.distribution_role,"size_bytes":a.size_bytes,"sha256":a.sha256,"download_url":d.artifact_url(slug,r,a)})
+}
+async fn applications(
+    Extension(state): Extension<AppState>,
+    query: Result<Query<CatalogQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Query(q) = query.map_err(|_| ApiError::BadRequest)?;
+    let limit = q.limit.unwrap_or(20);
+    let offset = q.offset.unwrap_or(0);
+    let page = state.distribution.applications(limit, offset).await?;
+    let items: Vec<_> = page.items.iter().map(|a| json!({
+        "name": a.name,
+        "slug": a.slug,
+        "icon_url": a.icon_key.as_ref().map(|_| format!("/api/v1/public/applications/{}/icon", a.slug)),
+    })).collect();
+    Ok(Json(
+        json!({"items": items, "total": page.total, "limit": limit, "offset": offset}),
+    ))
 }
 async fn release_dto(
     d: &PublicDistribution,

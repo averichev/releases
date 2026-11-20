@@ -3,7 +3,11 @@ use super::{
     release::ReleasesRepository,
 };
 use crate::{
-    domain::{application::Application, artifact::Artifact, release::Release},
+    domain::{
+        application::{Application, ApplicationPage},
+        artifact::Artifact,
+        release::Release,
+    },
     services::error::{Result, ServiceError},
 };
 use sqlx::{SqliteConnection, SqlitePool};
@@ -25,6 +29,12 @@ pub struct DistributionRepository {
 impl DistributionRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+    pub async fn applications(&self, limit: u32, offset: u32) -> Result<ApplicationPage> {
+        let mut tx = self.pool.begin().await?;
+        let page = ApplicationsRepository::public_page_in(&mut tx, limit, offset).await?;
+        tx.commit().await?;
+        Ok(page)
     }
     pub async fn snapshot(&self, app: &str, release: &str) -> Result<PublicationSnapshot> {
         let mut tx = self.pool.begin().await?;

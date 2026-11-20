@@ -119,6 +119,30 @@ impl ApplicationsRepository {
             }
         }
     }
+    pub async fn public_page_in(
+        c: &mut SqliteConnection,
+        limit: u32,
+        offset: u32,
+    ) -> Result<ApplicationPage> {
+        const FILTER: &str = " FROM applications WHERE status='active' AND visibility='public' AND EXISTS (SELECT 1 FROM releases WHERE application_id=applications.id AND status='published')";
+        let total = sqlx::query_scalar(&format!("SELECT count(*){FILTER}"))
+            .fetch_one(&mut *c)
+            .await?;
+        let rows: Vec<StoredApplication> = sqlx::query_as(&format!(
+            "SELECT *{FILTER} ORDER BY name_search, slug LIMIT ? OFFSET ?"
+        ))
+        .bind(i64::from(limit))
+        .bind(i64::from(offset))
+        .fetch_all(c)
+        .await?;
+        Ok(ApplicationPage {
+            items: rows
+                .into_iter()
+                .map(StoredApplication::application)
+                .collect::<Result<_>>()?,
+            total,
+        })
+    }
     pub async fn update(c: &mut SqliteConnection, app: &Application) -> Result<()> {
         sqlx::query("UPDATE applications SET name=?,name_search=?,description=?,visibility=?,status=?,icon_key=?,updated_at=? WHERE id=?")
             .bind(&app.name).bind(app.name.to_lowercase()).bind(&app.description)
