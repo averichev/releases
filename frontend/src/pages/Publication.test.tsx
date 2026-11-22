@@ -8,8 +8,8 @@ import Manifests from './Manifests';
 import type { Application } from '../api/applications';
 import type { Release } from '../api/releases';
 import { AppRoutes } from '../App';
-const app: Application = { id: 'app', slug: 'product', name: 'Product', description: '', icon_url: null, status: 'active', visibility: 'public', created_at: 1, updated_at: 1 };
-const release: Release = { id: 'release', application_id: app.id, version: '1.4.0', title: null, release_notes: 'Changes', status: 'draft', revision: 3, created_at: 1, updated_at: 1, published_at: null, artifact_count: 1, total_size_bytes: 3 };
+const app: Application = { download_count: 0, id: 'app', slug: 'product', name: 'Product', description: '', icon_url: null, status: 'active', visibility: 'public', created_at: 1, updated_at: 1 };
+const release: Release = { download_count: 0, id: 'release', application_id: app.id, version: '1.4.0', title: null, release_notes: 'Changes', status: 'draft', revision: 3, created_at: 1, updated_at: 1, published_at: null, artifact_count: 1, total_size_bytes: 3 };
 const ready = { release_revision: 3, validation: { state: 'ready', warnings: [], errors: [] } };
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 function show(element: ReactNode) { render(<App><MemoryRouter>{element}</MemoryRouter></App>); }
@@ -56,12 +56,12 @@ it('renders real manifest JSON and reports why Tauri cannot serve an update yet'
 });
 it('allows appending to published releases while keeping existing files read only', async () => {
   const user = { id: 'owner', username: 'owner', role: 'admin', status: 'active' };
-  const artifact = { id: 'artifact', release_id: release.id, filename: 'setup.exe', target: 'windows-x86_64', file_type: 'exe', size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1, distribution_role: 'updater', signature_present: true };
+  const artifact = { download_count: 0, id: 'artifact', release_id: release.id, filename: 'setup.exe', target: 'windows-x86_64', file_type: 'exe', size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1, distribution_role: 'updater', signature_present: true };
   vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? { user, csrf_token: 'csrf' } : url.includes('/distribution/releases/') ? {public_available: true, files: [{id: artifact.id, url: 'https://apps.example.test/product/releases/1.4.0/artifacts/artifact/download', tauri_compatible: true, signature_present: true}], warnings: []} : url.endsWith('/artifacts') ? [artifact] : url.endsWith('/artifact-options') ? { targets: [], file_types: [], max_file_bytes: 1024, upload_idle_seconds: 120 } : url.endsWith(`/${release.id}`) ? { ...release, status: 'published', published_at: 1 } : app))));
   render(<App><MemoryRouter initialEntries={[`/admin/applications/${app.id}/releases/${release.id}`]}><AppRoutes /></MemoryRouter></App>);
   expect(await screen.findByText('Published')).toBeDefined(); expect(screen.getByText('Подпись прикреплена')).toBeDefined();
   for (const name of ['Изменить релиз', 'Загрузить файл', 'Удалить', 'Удалить черновик', 'Опубликовать']) expect(screen.queryByRole('button', { name })).toBeNull();
-  expect(screen.queryByRole('combobox', { name: 'Назначение setup.exe' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Тип артефакта setup.exe' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Добавить артефакт' }));
   expect(await screen.findByText('Релиз опубликован. После добавления файл нельзя будет изменить или удалить.')).toBeDefined();
 });

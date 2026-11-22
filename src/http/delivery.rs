@@ -216,6 +216,9 @@ pub async fn deliver(
                 .parse()
                 .map_err(|_| ApiError::Internal)?,
         );
+        if requested.is_none_or(|(start, _)| start == 0) {
+            state.distribution.record_download(&download).await?;
+        }
         return Ok(response);
     }
     let mut count = length;
@@ -235,6 +238,12 @@ pub async fn deliver(
             header::CONTENT_LENGTH,
             count.to_string().parse().map_err(|_| ApiError::Internal)?,
         );
+    }
+    // Count accepted starts, not HEAD/validators, redirects, errors or resumed
+    // ranges. Persist before handing off the body; completion is not observable
+    // in Nginx mode and a disconnect does not undo a started download.
+    if requested.is_none_or(|(start, _)| start == 0) {
+        state.distribution.record_download(&download).await?;
     }
     let reader = ReaderStream::with_capacity(file.take(count), 64 * 1024);
     // Stream owns file + permit. Client disconnect drops both immediately.

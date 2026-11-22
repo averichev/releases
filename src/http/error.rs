@@ -80,7 +80,7 @@ impl IntoResponse for ApiError {
             Self::AmbiguousArtifact => (
                 StatusCode::CONFLICT,
                 "ambiguous_artifact",
-                "Specify target and format to select an installer",
+                "Multiple artifacts match; specify target, type (or purpose), and format",
             ),
             Self::UpdaterUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -125,7 +125,7 @@ impl IntoResponse for ApiError {
             Self::InvalidArtifact => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_artifact",
-                "Invalid filename, target, format or multipart fields",
+                "Invalid filename, target, artifact type, format or multipart fields",
             ),
             Self::UpdaterSignatureRequired => (
                 StatusCode::UNPROCESSABLE_ENTITY,

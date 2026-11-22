@@ -3,13 +3,23 @@ import { applicationPath } from './applications';
 export interface Release {
   id: string; application_id: string; version: string; title: string | null; release_notes: string;
   status: 'draft' | 'published'; revision: number; created_at: number; updated_at: number; published_at: number | null; artifact_count: number; total_size_bytes: number;
+  download_count: number;
 }
 export interface ReleaseValues { version: string; title?: string; release_notes: string }
 export interface ReleasePage { items: Release[]; total: number; page: number; per_page: number }
+export type ArtifactType = 'executable' | 'installer' | 'updater' | 'archive';
+export const artifactTypes: {value: ArtifactType; label: string; description: string}[] = [
+  { value: 'executable', label: 'Исполняемый файл', description: 'Самостоятельное приложение: EXE, ELF или Mach-O. Подпись и установщик не нужны.' },
+  { value: 'installer', label: 'Установочный пакет', description: 'Устанавливает приложение: Setup EXE, MSI, DMG, DEB или RPM.' },
+  { value: 'updater', label: 'Пакет обновления (Tauri Updater)', description: 'Для Tauri Updater. Подпись .sig нужна для автоматического обновления и добавления в опубликованный релиз.' },
+  { value: 'archive', label: 'Архив', description: 'ZIP, TAR.GZ или другой архив с файлами приложения.' },
+];
+export const artifactTypeName = (value: string) => artifactTypes.find((kind) => kind.value === value)?.label ?? value;
 export interface Artifact {
-  id: string; release_id: string; filename: string; target: string; file_type: string; size_bytes: number; sha256: string; created_at: number; distribution_role: 'installer' | 'updater'; signature_present: boolean;
+  id: string; release_id: string; filename: string; target: string; file_type: string; size_bytes: number; sha256: string; created_at: number; distribution_role: ArtifactType; signature_present: boolean;
+  download_count: number;
 }
-export interface UploadOptions { targets: string[]; file_types: string[]; max_file_bytes: number; upload_idle_seconds: number }
+export interface UploadOptions { targets: string[]; file_types: string[]; artifact_types?: ArtifactType[]; max_file_bytes: number; upload_idle_seconds: number }
 export const releasesPath = (app: string) => `${applicationPath(app)}/releases`;
 export const releasePath = (app: string, release: string) => `${releasesPath(app)}/${encodeURIComponent(release)}`;
 export const releaseRoute = (app: string, release: string) => `/admin/applications/${encodeURIComponent(app)}/releases/${encodeURIComponent(release)}`;

@@ -39,7 +39,7 @@ fn validate_selection(query: &ArtifactSelection) -> Result<()> {
         || query
             .purpose
             .as_ref()
-            .is_some_and(|p| !matches!(p.as_str(), "installer" | "updater"))
+            .is_some_and(|p| !crate::domain::artifact::ARTIFACT_TYPES.contains(&p.as_str()))
     {
         return Err(ServiceError::InvalidArtifact);
     }
@@ -66,10 +66,23 @@ pub struct DistributionHistory {
     pub releases: Vec<(Release, Vec<Artifact>)>,
     pub total: i64,
 }
-/// Latest installers for each target, retaining all formats of that version.
-pub fn latest_installers(
+pub type LatestArtifacts = std::collections::BTreeMap<String, (Release, Vec<Artifact>)>;
+/// Latest manual downloads grouped by the same artifact types used for upload.
+pub fn latest_downloads(
     catalog: &PublishedCatalog,
-) -> std::collections::BTreeMap<String, (Release, Vec<Artifact>)> {
+) -> impl Iterator<Item = (&'static str, LatestArtifacts)> + '_ {
+    crate::domain::artifact::ARTIFACT_TYPES
+        .iter()
+        .copied()
+        .filter(|kind| *kind != "updater")
+        .map(|kind| (kind, latest_by_type(catalog, kind)))
+}
+/// Compatibility view: latest installers for each target, retaining all formats.
+pub fn latest_installers(catalog: &PublishedCatalog) -> LatestArtifacts {
+    latest_by_type(catalog, "installer")
+}
+/// Latest matching release per target and type; types and formats never substitute each other.
+pub fn latest_by_type(catalog: &PublishedCatalog, artifact_type: &str) -> LatestArtifacts {
     let mut targets = std::collections::BTreeMap::new();
     for (release, artifacts) in &catalog.releases {
         if !release.version.pre.is_empty() {
@@ -77,7 +90,7 @@ pub fn latest_installers(
         }
         for a in artifacts
             .iter()
-            .filter(|a| a.distribution_role == "installer")
+            .filter(|a| a.distribution_role == artifact_type)
         {
             let entry = targets
                 .entry(a.target.clone())
@@ -89,8 +102,7 @@ pub fn latest_installers(
     }
     targets
 }
-/// One context for every public download, ready for future request-level analytics.
-/// It intentionally does not equate GET, HEAD, ranges or redirects to installations.
+/// Authorization context shared by delivery and the download counter.
 pub struct PublicDownload {
     pub application: Application,
     pub release: Release,
@@ -165,10 +177,8 @@ impl PublicDistribution {
         })
     }
     pub async fn latest(&self, slug: &str, query: &ArtifactSelection) -> Result<PublicDownload> {
-        // latest is an installer shortcut; updater has its own signature-aware resolver.
-        if query.target.is_none() || query.purpose.as_deref().is_some_and(|p| p != "installer") {
-            return Err(ServiceError::InvalidArtifact);
-        }
+        // Legacy links default to installer. Explicit types select ordinary downloads;
+        // automatic updates continue through their signature-aware resolvers.
         validate_selection(query)?;
         let catalog = self.published(slug, true).await?;
         for (release, artifacts) in catalog.releases {
@@ -266,6 +276,15 @@ impl PublicDistribution {
             .clone()
             .try_acquire_owned()
             .map_err(|_| ServiceError::StorageBusy)
+    }
+    pub async fn record_download(&self, download: &PublicDownload) -> Result<()> {
+        self.repository
+            .record_download(
+                &download.application.id,
+                &download.release.id,
+                &download.artifact.id,
+            )
+            .await
     }
     pub fn internal_uri(&self, artifact: &Artifact) -> Result<String> {
         self.storage.internal_uri(&artifact.storage_key)

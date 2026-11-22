@@ -260,7 +260,7 @@ fn semver_and_format_rules_cover_normalization_precedence_and_open_formats() {
     );
     assert_eq!(file_type("installer", Some("BIN")).as_deref(), Some("bin"));
     assert!(file_type("installer.exe", Some("zip")).is_none());
-    assert!(file_type("installer", None).is_none());
+    assert_eq!(file_type("installer", None).as_deref(), Some("bin"));
     for name in [
         "../secret.bin",
         "/etc/passwd",
@@ -591,7 +591,7 @@ async fn administrative_gates_csrf_ownership_and_no_public_access() {
 #[tokio::test]
 async fn invalid_oversized_truncated_and_cancelled_uploads_are_not_visible() {
     let app = TestApp::new().await;
-    for filename in ["../escape.bin", "a\\b.bin", "unknown", ""] {
+    for filename in ["../escape.bin", "a\\b.bin", "invalid.", ""] {
         app.upload(filename, "any", b"abc", 422).await;
     }
     app.upload("file.bin", "tauri-windows-x64", b"abc", 422)

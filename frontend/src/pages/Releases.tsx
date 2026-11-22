@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { date, type Application } from '../api/applications';
 import { releaseError, releaseRoute, releasesPath, size, type Release, type ReleasePage, type ReleaseValues } from '../api/releases';
 import ReleaseForm from './ReleaseForm';
+import DownloadCount from '../components/DownloadCount';
 export default function Releases({ application, administrator }: { application: Application; administrator: boolean }) {
   const navigate = useNavigate(); const [params, setParams] = useSearchParams();
   const [page, setPage] = useState<ReleasePage>(); const [error, setError] = useState(''); const [attempt, setAttempt] = useState(0);
@@ -32,6 +33,7 @@ export default function Releases({ application, administrator }: { application: 
       { title: 'Название', dataIndex: 'title', render: (value: string | null) => value || '—' },
       { title: 'Статус', render: (_, release) => <Tag color={release.status === 'published' ? 'green' : undefined}>{release.status === 'published' ? 'Published' : 'Draft'}</Tag> }, { title: 'Создан', dataIndex: 'created_at', render: date },
       { title: 'Файлы', dataIndex: 'artifact_count' }, { title: 'Размер', dataIndex: 'total_size_bytes', render: size },
+      { title: 'Скачивания', dataIndex: 'download_count', render: (count: number) => <DownloadCount count={count} /> },
       { title: 'Действия', render: (_, release) => <Link to={releaseRoute(application.id, release.id)}>Открыть</Link> },
     ]} />}
     <Modal title="Новый релиз" open={creating} footer={null} destroyOnHidden closable={!busy} keyboard={!busy} mask={{ closable: !busy }} onCancel={() => { if (!busy) setCreating(false); }}>

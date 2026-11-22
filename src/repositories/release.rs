@@ -4,7 +4,7 @@ use crate::{
 };
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
-const SELECT: &str = "SELECT r.*, (SELECT count(*) FROM artifacts a WHERE a.release_id=r.id) AS artifact_count, (SELECT coalesce(sum(size_bytes),0) FROM artifacts a WHERE a.release_id=r.id) AS total_size_bytes FROM releases r";
+const SELECT: &str = "SELECT r.*, (SELECT count(*) FROM artifacts a WHERE a.release_id=r.id) AS artifact_count, (SELECT coalesce(sum(size_bytes),0) FROM artifacts a WHERE a.release_id=r.id) AS total_size_bytes, (SELECT coalesce(sum(d.download_count),0) FROM artifacts a JOIN artifact_download_counts d ON d.artifact_id=a.id WHERE a.release_id=r.id) AS download_count FROM releases r";
 #[derive(sqlx::FromRow)]
 struct StoredRelease {
     id: String,
@@ -19,6 +19,7 @@ struct StoredRelease {
     published_at: Option<i64>,
     artifact_count: i64,
     total_size_bytes: i64,
+    download_count: i64,
 }
 impl StoredRelease {
     fn release(self) -> Result<Release> {
@@ -38,6 +39,7 @@ impl StoredRelease {
             published_at: self.published_at,
             artifact_count: self.artifact_count,
             total_size_bytes: self.total_size_bytes,
+            download_count: self.download_count,
         })
     }
 }

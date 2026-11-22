@@ -60,6 +60,7 @@ impl ApplicationCatalog {
             standalone_public_key: None,
             product_id: None,
             product_id_locked: false,
+            download_count: 0,
             visibility: input.visibility,
             status: Status::Active,
             created_at: now,

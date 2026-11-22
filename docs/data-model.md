@@ -24,7 +24,7 @@ UUID id; application_id → applications, RESTRICT; version и version_key (бе
 
 ## artifacts
 
-UUID id; release_id → releases, CASCADE для удаляемых черновиков; filename (метаданные); target; file_type; size_bytes>0; sha256 (64 lowercase hex); уникальный непрозрачный storage_key; created_at; distribution_role `installer|updater` (default installer); nullable updater_signature (до 16384 символов, только updater).
+UUID id; release_id → releases, CASCADE для удаляемых черновиков; filename (метаданные); target; file_type; size_bytes>0; sha256 (64 lowercase hex); уникальный непрозрачный storage_key; created_at; distribution_role `executable|installer|updater|archive` (default installer); nullable updater_signature (до 16384 символов, только updater).
 
 UNIQUE(release_id,target,file_type,distribution_role). Частичный UNIQUE(release_id,target) WHERE distribution_role='updater' разрешает максимум один updater на платформу независимо от формата. Базовые поля неизменны даже у draft; заменяют файл удалением/новой загрузкой. У draft сервис позволяет менять роль/подпись с увеличением revision родителя. У published разрешён INSERT нового файла; UPDATE/DELETE существующих запрещены. Отдельный BEFORE INSERT не допускает замену опубликованного объекта через INSERT OR REPLACE, а новый published updater требует непустую подпись. Структура подписи и совместимость формата проверяются сервисом. Диск обслуживается только через ArtifactStorage. DB-транзакция не считается атомарной с файловой системой.
 
@@ -33,6 +33,12 @@ UNIQUE(release_id,target,file_type,distribution_role). Частичный UNIQUE
 Монотонный INTEGER id; application_id; release_id UNIQUE; user_id; created_at. Составной FK(release_id,application_id) ссылается на релиз того же приложения; пользователь защищён FK RESTRICT. Индекс(application_id,id DESC) обслуживает cursor before. UPDATE/DELETE запрещены. Факт первой публикации записывается атомарно со статусом релиза; дополнение файлами не создаёт новую публикацию.
 
 ApiToken и DownloadEvent не создаются. URL и JSON не сохраняются в БД. Каталог опубликованных версий читается в одном snapshot и сортируется по SemVer. Выбор установщиков выполняется отдельно для target/формата, подписанных updater — отдельно по совместимости. Limit истории не ограничивает поиск актуальных платформ.
+
+## artifact_download_counts
+
+Миграция `0013_download_counts.sql` добавляет `artifact_id` — PRIMARY KEY/FK → artifacts с CASCADE и `download_count` — INTEGER NOT NULL с CHECK целочисленности и неотрицательности. До первого скачивания строки нет, читается ноль; исторические загрузки не восстанавливаются. Опубликованные артефакты и версии защищены от удаления существующими триггерами, поэтому их итоги сохраняются и после архивации/скрытия приложения.
+
+Один INSERT SELECT ON CONFLICT атомарно проверяет принадлежность artifact → release → application, published/public/active и увеличивает счётчик. Параллельные запросы не теряют приращения. Версия и приложение получают SUM по связям UUID: дублирующих итоговых счётчиков нет. Изменение счётчика не меняет revision, timestamps, содержимое подписанных артефактов или ETag манифеста. Индексы artifacts(release_id), releases(application_id) и PRIMARY KEY счётчика обслуживают агрегации. Журнал событий, IP, cookie, User-Agent и персональные идентификаторы не сохраняются.
 
 Переход существующей базы и проверка ограничения публичного доступа: [миграция 0009](migration-0009.md). В актуальной схеме остаются Application, Release, Artifact и история фактических публикаций; отдельного селектора установщика приложения нет.
 
@@ -45,3 +51,11 @@ ApiToken и DownloadEvent не создаются. URL и JSON не сохран
 Миграция `0008_artifact_roles_and_append.sql` перестраивает только artifacts с включёнными FK, переносит все колонки без изменения UUID, ключей, SHA-256 и подписей. Releases и история не перестраиваются. При прежних нескольких updater на одном target миграция атомарно отклоняется: автоматическое удаление/переназначение опубликованных файлов недопустимо. Перед обновлением проверьте `SELECT release_id,target,count(*) FROM artifacts WHERE distribution_role='updater' GROUP BY release_id,target HAVING count(*)>1`. Для черновика исправьте назначения старой версией сервера; конфликт опубликованных данных требует отдельного согласованного решения с сохранением исходной БД и файлов.
 
 Добавление файла выполняется через ArtifactStorage: потоковый SHA-256, полное сохранение объекта, затем короткая BEGIN IMMEDIATE с повторной авторизацией, проверкой статуса, ограничений уникальности. Запись артефакта и revision родителя фиксируются вместе; history и published_at остаются прежними. Незавершённый или отклонённый объект компенсируется существующим guard; неоднозначный commit оставляет безопасный файл до startup reconciliation. Манифест читает опубликованные версии и списки файлов одним read snapshot, ETag рассчитывается из его JSON.
+
+## Универсальные типы артефактов
+
+Миграция `0012_artifact_types.sql` расширяет CHECK существующего artifacts.distribution_role, не создавая параллельного поля. `installer` и `updater` сохраняют значения; новые типы — `executable` и `archive`. Исторические installer не переопределяются по имени: назначение EXE невозможно достоверно восстановить из расширения. Опубликованные файлы остаются неизменяемыми.
+
+Перестраивается только artifacts при включённых FK. Все UUID, release_id, filename, target, file_type, размеры, SHA-256, storage_key, timestamps и обе подписи копируются без изменения; физические файлы не затрагиваются. Восстанавливаются индексы, запрет UPDATE/DELETE опубликованных объектов, защита от REPLACE, требования Tauri и существующие standalone guards. Уникальность остаётся `(release_id,target,file_type,distribution_role)` плюс один Tauri updater на release/target. Поэтому Windows EXE executable и installer одной версии не конфликтуют, а два executable одного target/формата отклоняются.
+
+Классификация executable не включает автоматически существующий механизм подписанных standalone-обновлений. Старые standalone installer и их JWS/ключи сохраняются; обычный executable публикуется без подписи и ключей. PublicDistribution фильтрует latest по target/типу/формату до выбора SemVer; старый installer latest и latest_by_target совместимы. Каталог и manifest v2 дополнены latest_by_type для ручного скачивания executable/installer/archive.

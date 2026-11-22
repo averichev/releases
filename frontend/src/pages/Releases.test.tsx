@@ -4,9 +4,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
 import { AppRoutes } from '../App';
 import { detectedType, size, validVersion } from '../api/releases';
-const application = { id: 'b8daf7db-a749-4165-a559-860ddbc6f28c', name: 'Product', slug: 'product', description: '', icon_url: null, visibility: 'private', status: 'active', created_at: 1, updated_at: 1 };
-const release = { id: '8d643b6a-6b79-483a-b819-c2617ff6be27', application_id: application.id, version: '1.2.0', title: null, release_notes: 'Changes', status: 'draft', created_at: 1, updated_at: 1, published_at: null, artifact_count: 1, total_size_bytes: 3 };
-const artifact = { id: 'file-id', release_id: release.id, filename: 'installer.bin', target: 'windows-x86_64', file_type: 'bin', size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1 };
+const application = { download_count: 0, id: 'b8daf7db-a749-4165-a559-860ddbc6f28c', name: 'Product', slug: 'product', description: '', icon_url: null, visibility: 'private', status: 'active', created_at: 1, updated_at: 1 };
+const release = { download_count: 0, id: '8d643b6a-6b79-483a-b819-c2617ff6be27', application_id: application.id, version: '1.2.0', title: null, release_notes: 'Changes', status: 'draft', created_at: 1, updated_at: 1, published_at: null, artifact_count: 1, total_size_bytes: 3 };
+const artifact = { download_count: 0, id: 'file-id', release_id: release.id, filename: 'installer.bin', target: 'windows-x86_64', file_type: 'bin', size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1 };
 const options = { targets: ['windows-x86_64', 'any'], file_types: ['bin', 'exe'], max_file_bytes: 1024, upload_idle_seconds: 120 };
 const user = { id: 'owner', username: 'owner', role: 'admin', status: 'active', created_at: 1, updated_at: 1, last_login_at: 1 };
 const session = { user, csrf_token: 'csrf' };
@@ -59,7 +59,7 @@ it('edits draft metadata and requires confirmation before deletion', async () =>
   expect(await screen.findByText('Черновик и все его файлы будут удалены. Восстановить их через панель нельзя.')).toBeDefined();
   expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
-}, 15000);
+});
 it('shows detail errors and allows retry', async () => {
   vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(url.endsWith('/auth/me') ? response(session) : response({ error: { code: 'internal_error' } }, 500))));
   renderAt(route); expect(await screen.findByText('Не удалось загрузить релиз')).toBeDefined(); expect(screen.getByRole('button', { name: 'Повторить' })).toBeDefined();
@@ -73,6 +73,8 @@ it('keeps active uploads open on Escape and supports explicit cancellation', asy
   }
   vi.stubGlobal('XMLHttpRequest', PendingXhr); mockFetch(); renderAt(route);
   fireEvent.click(await screen.findByRole('button', { name: 'Добавить артефакт' }));
+  fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'Тип артефакта' }));
+  fireEvent.click(await screen.findByText('Архив', {selector: '.ant-select-item-option-content'}));
   const platform = await screen.findByRole('combobox', { name: 'Целевая платформа' }); fireEvent.mouseDown(platform);
   fireEvent.click(await screen.findByText('Любая платформа'));
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -105,7 +107,7 @@ it('refreshes artifacts and public links after appending to a published release'
   vi.stubGlobal('fetch', fetch); renderAt(route);
   fireEvent.click(await screen.findByRole('button', { name: 'Добавить артефакт' }));
   const dialog = await screen.findByRole('dialog', { name: 'Загрузка дистрибутива' });
-  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Назначение' }));
+  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Тип артефакта' }));
   fireEvent.click(await screen.findByText('Пакет обновления (Tauri Updater)'));
   fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Целевая платформа' }));
   fireEvent.click(await screen.findByText('Windows x64', { selector: '.ant-select-item-option-content' }));
@@ -117,5 +119,20 @@ it('refreshes artifacts and public links after appending to a published release'
   expect(await screen.findByText('updater.exe', { selector: '.artifact-filename' })).toBeDefined();
   expect(await screen.findByRole('link', { name: 'https://example.test/new-updater' })).toBeDefined();
   expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
-  expect(screen.queryByRole('combobox', { name: 'Назначение updater.exe' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Тип артефакта updater.exe' })).toBeNull();
 }, 40000);
+
+it('shows separate release and artifact download counts and refreshes them from the API', async () => {
+  let refreshed = false;
+  const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? { ...session, user: { ...user, role: 'operator' } }
+    : url.endsWith('/artifact-options') ? options : url.endsWith('/artifacts') ? [{ ...artifact, download_count: refreshed ? 18 : 17 }]
+      : url.endsWith(`/${release.id}`) ? { ...release, download_count: refreshed ? 43 : 42 } : application)));
+  vi.stubGlobal('fetch', fetch); renderAt(route);
+  await screen.findByRole('heading', { name: release.version });
+  expect(within(document.querySelector('.release-info')!).getByText('42')).toBeDefined();
+  expect(within(document.querySelector('.release-artifacts')!).getByText('17')).toBeDefined();
+  refreshed = true;
+  fireEvent.click(screen.getByRole('button', { name: 'Обновить список' }));
+  expect(await within(document.querySelector('.release-info')!).findByText('43')).toBeDefined();
+  expect(within(document.querySelector('.release-artifacts')!).getByText('18')).toBeDefined();
+});

@@ -2,6 +2,7 @@ import { api, ApiError } from './client';
 export interface Application {
   id: string; slug: string; name: string; description: string; icon_url: string | null;
   status: 'active' | 'archived'; visibility: 'private' | 'public'; created_at: number; updated_at: number;
+  download_count: number;
 }
 export interface ApplicationPage { items: Application[]; total: number; page: number; per_page: number }
 export interface ApplicationValues { name: string; slug: string; description: string; visibility: 'private' | 'public' }

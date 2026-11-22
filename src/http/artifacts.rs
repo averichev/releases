@@ -55,6 +55,7 @@ pub(super) struct ArtifactDto {
     distribution_role: String,
     signature_present: bool,
     standalone_signature_present: bool,
+    download_count: i64,
 }
 impl From<Artifact> for ArtifactDto {
     fn from(a: Artifact) -> Self {
@@ -70,6 +71,7 @@ impl From<Artifact> for ArtifactDto {
             distribution_role: a.distribution_role,
             signature_present: a.updater_signature.is_some(),
             standalone_signature_present: a.standalone_signature.is_some(),
+            download_count: a.download_count,
         }
     }
 }
@@ -77,6 +79,7 @@ impl From<Artifact> for ArtifactDto {
 struct OptionsDto {
     targets: &'static [&'static str],
     file_types: &'static [&'static str],
+    artifact_types: &'static [&'static str],
     max_file_bytes: u64,
     upload_idle_seconds: u64,
 }
@@ -84,6 +87,7 @@ async fn options(Extension(state): Extension<AppState>) -> Json<OptionsDto> {
     Json(OptionsDto {
         targets: artifact::TARGETS,
         file_types: artifact::FILE_TYPES,
+        artifact_types: artifact::ARTIFACT_TYPES,
         max_file_bytes: state.storage_config.max_file_bytes,
         upload_idle_seconds: state.storage_config.upload_idle_seconds,
     })

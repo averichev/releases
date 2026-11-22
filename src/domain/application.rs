@@ -13,6 +13,7 @@ pub struct Application {
     pub standalone_public_key: Option<String>,
     pub product_id: Option<String>,
     pub product_id_locked: bool,
+    pub download_count: i64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

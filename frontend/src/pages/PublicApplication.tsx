@@ -3,21 +3,21 @@ import { Alert, Avatar, Button, Card, Empty, List, Pagination, Result, Space, Sp
 import { DownloadOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom';
 import { api, ApiError, errorMessage } from '../api/client';
-import { size, targetName } from '../api/releases';
+import { artifactTypeName, size, targetName } from '../api/releases';
 import { PublicLayout } from '../components/PublicLayout';
 export interface PublicArtifact { id: string; filename: string; target: string; format: string; purpose: string; size_bytes: number; download_url: string }
 export interface PublicRelease { version: string; published_at: string; notes: string; artifacts: PublicArtifact[] }
-interface PublicApp { name: string; description: string; slug: string; icon_url: string | null; latest_by_target: Record<string, PublicRelease> }
+interface PublicApp { name: string; description: string; slug: string; icon_url: string | null; latest_by_target: Record<string, PublicRelease>; latest_by_type?: Record<string, Record<string, PublicRelease>> }
 interface History { items: PublicRelease[]; total: number }
 const releaseDate = (s: string) => new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 function Files({ release }: { release: PublicRelease }) {
-  return <List dataSource={release.artifacts} renderItem={(a) => <List.Item><Space wrap><a href={a.download_url}>{a.filename}</a><Tag>{targetName(a.target)}</Tag><Typography.Text type="secondary">{size(a.size_bytes)} · {a.purpose === 'updater' ? 'Пакет обновления' : 'Установщик'}</Typography.Text></Space></List.Item>} />;
+  return <List dataSource={release.artifacts} renderItem={(a) => <List.Item><Space wrap><a href={a.download_url}>{a.filename}</a><Tag>{targetName(a.target)}</Tag><Tag>{artifactTypeName(a.purpose)}</Tag><Typography.Text type="secondary">{a.format.toUpperCase()} · {size(a.size_bytes)}</Typography.Text></Space></List.Item>} />;
 }
 function Download({ app }: { app: PublicApp }) {
-  const installers = Object.entries(app.latest_by_target);
-  if (!installers.length) return <Empty description="Установщиков пока нет" />;
-  return <section aria-label="Актуальные установщики"><Typography.Title level={2}>Скачать приложение</Typography.Title><Space orientation="vertical" className="full-width">
-    {installers.map(([target, release]) => <Card key={target} title={targetName(target)} extra={<Tag>v{release.version}</Tag>}>
+  const downloads = Object.entries(app.latest_by_type ?? {installer: app.latest_by_target}).flatMap(([kind, targets]) => Object.entries(targets).map(([target, release]) => ({kind, target, release})));
+  if (!downloads.length) return <Empty description="Файлов для скачивания пока нет" />;
+  return <section aria-label="Актуальные файлы"><Typography.Title level={2}>Скачать приложение</Typography.Title><Space orientation="vertical" className="full-width">
+    {downloads.map(({kind, target, release}) => <Card key={`${kind}-${target}`} title={`${targetName(target)} · ${artifactTypeName(kind)}`} extra={<Tag>v{release.version}</Tag>}>
       <Typography.Paragraph type="secondary">{releaseDate(release.published_at)}</Typography.Paragraph>
       <Space orientation="vertical" className="full-width">{release.artifacts.map((a) => <Space key={a.id} wrap>
         <Button type="primary" icon={<DownloadOutlined />} href={a.download_url}>Скачать {a.format.toUpperCase()}</Button>

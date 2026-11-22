@@ -54,6 +54,7 @@ pub fn documents_router() -> Router<AppState> {
 struct DownloadQuery {
     target: Option<String>,
     format: Option<String>,
+    #[serde(alias = "type")]
     purpose: Option<String>,
 }
 impl DownloadQuery {
@@ -83,7 +84,12 @@ async fn latest_page(
     let Path(slug) = path.map_err(|_| ApiError::NotFound)?;
     let Query(q) = query.map_err(|_| ApiError::BadRequest)?;
     if q.target.is_some() || q.format.is_some() || q.purpose.is_some() {
-        return Err(ApiError::BadRequest);
+        let d = state.distribution.latest(&slug, &q.selection()).await?;
+        return Ok(redirect(state.distribution.artifact_path(
+            &slug,
+            &d.release,
+            &d.artifact,
+        )));
     }
     state.distribution.application(&slug, true).await?;
     Ok(redirect(format!("/{slug}")))
@@ -208,15 +214,23 @@ async fn application(
     let catalog = state.distribution.published(&slug, true).await?;
     let a = &catalog.application;
     let mut latest_by_target = std::collections::BTreeMap::new();
-    for (target, (r, artifacts)) in crate::services::distribution::latest_installers(&catalog) {
-        latest_by_target.insert(
-            target,
-            release_dto(&state.distribution, &slug, &r, &artifacts).await?,
-        );
+    let mut latest_by_type = std::collections::BTreeMap::new();
+    for (kind, targets) in crate::services::distribution::latest_downloads(&catalog) {
+        let mut documents = std::collections::BTreeMap::new();
+        for (target, (r, artifacts)) in targets {
+            documents.insert(
+                target,
+                release_dto(&state.distribution, &slug, &r, &artifacts).await?,
+            );
+        }
+        if kind == "installer" {
+            latest_by_target = documents.clone();
+        }
+        latest_by_type.insert(kind, documents);
     }
     state.distribution.recheck(&a.id).await?;
     Ok(Json(
-        json!({"name":a.name,"description":a.description,"slug":a.slug,"icon_url":a.icon_key.as_ref().map(|_|format!("/api/v1/public/applications/{}/icon",a.slug)),"latest_by_target":latest_by_target}),
+        json!({"name":a.name,"description":a.description,"slug":a.slug,"icon_url":a.icon_key.as_ref().map(|_|format!("/api/v1/public/applications/{}/icon",a.slug)),"latest_by_target":latest_by_target,"latest_by_type":latest_by_type}),
     ))
 }
 async fn history(
@@ -295,8 +309,13 @@ async fn settings(
     let downloads: Vec<_> = crate::services::distribution::latest_installers(&catalog).into_iter().map(|(target, (r, files))| {
         json!({"target":target,"version":r.version.to_string(),"formats":files.iter().map(|a| &a.file_type).collect::<Vec<_>>(),"url":format!("{base}/{slug}/latest/{target}"),"format_urls":files.iter().map(|a|json!({"format":a.file_type,"url":format!("{base}/{slug}/latest/{target}?format={}",a.file_type)})).collect::<Vec<_>>()})
     }).collect();
+    let artifact_downloads: Vec<_> = crate::services::distribution::latest_downloads(&catalog)
+        .flat_map(|(kind, targets)| targets.into_iter().map(move |(target, (release, files))| {
+            json!({"type":kind,"target":target,"version":release.version.to_string(),"files":files.iter().map(|a|json!({"format":a.file_type,"url":format!("{base}/{slug}/latest/{target}?type={kind}&format={}",a.file_type)})).collect::<Vec<_>>()})
+        }))
+        .collect();
     Ok(Json(
-        json!({"public_available":crate::services::distribution::public_application(&a).is_ok(),"application_url":format!("{base}/{slug}"),"latest_url":format!("{base}/{slug}/latest"),"manifest_url":format!("{base}/{slug}/manifest.json"),"tauri_url":crate::services::tauri_integration::endpoint(base,slug)?,"downloads":downloads}),
+        json!({"public_available":crate::services::distribution::public_application(&a).is_ok(),"application_url":format!("{base}/{slug}"),"latest_url":format!("{base}/{slug}/latest"),"manifest_url":format!("{base}/{slug}/manifest.json"),"tauri_url":crate::services::tauri_integration::endpoint(base,slug)?,"downloads":downloads,"artifact_downloads":artifact_downloads}),
     ))
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import DownloadCount from '../components/DownloadCount';
 import { Alert, App, Button, Card, Dropdown, Empty, Input, Pagination, Segmented, Select, Space, Spin, Table, Typography } from 'antd';
 import { AppstoreOutlined, MoreOutlined, PlusOutlined, ReloadOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -67,11 +68,12 @@ export default function Applications() {
         <Typography.Title level={2}><Link to={`/admin/applications/${app.id}`}>{app.name}</Link></Typography.Title>
         <Typography.Text className="application-slug" type="secondary">/{app.slug}</Typography.Text>
         <Typography.Paragraph className="application-description" ellipsis={{ rows: 3 }}>{app.description || 'Описание не добавлено'}</Typography.Paragraph>
-        <ApplicationTags application={app} /><Typography.Text className="application-updated" type="secondary">Изменено {date(app.updated_at)}</Typography.Text>
+        <ApplicationTags application={app} /><Typography.Paragraph>Скачивания: <DownloadCount count={app.download_count} /></Typography.Paragraph><Typography.Text className="application-updated" type="secondary">Изменено {date(app.updated_at)}</Typography.Text>
       </Card>)}</div> : <Card className="catalog-table"><Table rowKey="id" dataSource={data.items} pagination={false} scroll={{ x: 850 }} columns={[
         { title: 'Приложение', dataIndex: 'name', render: (_, app) => <Space><ApplicationIcon application={app} size={36} /><div><Link to={`/admin/applications/${app.id}`}>{app.name}</Link><div className="application-slug">/{app.slug}</div></div></Space> },
         { title: 'Описание', dataIndex: 'description', ellipsis: true, render: (v: string) => v || '—' },
         { title: 'Состояние', key: 'status', render: (_, app) => <ApplicationTags application={app} /> },
+        { title: 'Скачивания', dataIndex: 'download_count', render: (count: number) => <DownloadCount count={count} /> },
         { title: 'Изменено', dataIndex: 'updated_at', render: date },
         { title: '', key: 'actions', width: 52, render: (_, app) => actions(app) },
       ]} /></Card>}

@@ -55,6 +55,7 @@ struct ApplicationDto {
     status: &'static str,
     created_at: i64,
     updated_at: i64,
+    download_count: i64,
 }
 impl From<Application> for ApplicationDto {
     fn from(app: Application) -> Self {
@@ -70,6 +71,7 @@ impl From<Application> for ApplicationDto {
             status: app.status.as_str(),
             created_at: app.created_at,
             updated_at: app.updated_at,
+            download_count: app.download_count,
         }
     }
 }

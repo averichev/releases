@@ -43,6 +43,7 @@ pub(super) struct ReleaseDto {
     published_at: Option<i64>,
     artifact_count: i64,
     total_size_bytes: i64,
+    download_count: i64,
 }
 impl From<Release> for ReleaseDto {
     fn from(r: Release) -> Self {
@@ -59,6 +60,7 @@ impl From<Release> for ReleaseDto {
             published_at: r.published_at,
             artifact_count: r.artifact_count,
             total_size_bytes: r.total_size_bytes,
+            download_count: r.download_count,
         }
     }
 }

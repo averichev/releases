@@ -99,10 +99,10 @@ impl ArtifactManagement {
         let file_type = artifact::file_type(&metadata.filename, metadata.file_type.as_deref())
             .ok_or(ServiceError::InvalidArtifact)?;
         let role = metadata.distribution_role.as_deref().unwrap_or("installer");
-        if !matches!(role, "installer" | "updater")
-            || (role == "updater"
-                && compatible_tauri_format(&metadata.target, &file_type).is_none())
-        {
+        if !artifact::ARTIFACT_TYPES.contains(&role) {
+            return Err(ServiceError::InvalidArtifact);
+        }
+        if role == "updater" && compatible_tauri_format(&metadata.target, &file_type).is_none() {
             return Err(ServiceError::InvalidUpdater);
         }
         // This short transaction finishes before receiving file bytes.
@@ -148,6 +148,7 @@ impl ArtifactManagement {
             distribution_role: upload.distribution_role,
             updater_signature: upload.updater_signature,
             standalone_signature: upload.standalone_signature,
+            download_count: 0,
         };
         let mut tx = self.releases.write().await?;
         authorize(&mut tx, actor).await?;
@@ -237,17 +238,19 @@ impl ArtifactManagement {
             .find(|a| a.id == id)
             .ok_or(ServiceError::NotFound)?;
         if let Some(role) = role {
-            if !matches!(role, "installer" | "updater")
-                || (role == "updater"
-                    && crate::domain::publication::compatible_tauri_target(&artifact).is_none())
+            if !artifact::ARTIFACT_TYPES.contains(&role) {
+                return Err(ServiceError::InvalidArtifact);
+            }
+            if role == "updater"
+                && crate::domain::publication::compatible_tauri_target(&artifact).is_none()
             {
                 return Err(ServiceError::InvalidUpdater);
             }
             artifact.distribution_role = role.into();
-            if role == "updater" && artifact.standalone_signature.is_some() {
+            if role != "installer" && artifact.standalone_signature.is_some() {
                 return Err(ServiceError::InvalidStandalone);
             }
-            if role == "installer" {
+            if role != "updater" {
                 artifact.updater_signature = None;
             }
         }

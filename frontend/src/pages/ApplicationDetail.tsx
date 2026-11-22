@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Result, Space, Spin, Tabs, Typography } from 'antd';
+import DownloadCount from '../components/DownloadCount';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/Auth';
 import { api, ApiError } from '../api/client';
@@ -77,6 +78,7 @@ export default function ApplicationDetail() {
       <Descriptions column={1} size="small" items={[
         { key: 'id', label: 'UUID', children: <Typography.Text code copyable>{application.id}</Typography.Text> },
         { key: 'slug', label: 'Slug', children: <Typography.Text code>{application.slug}</Typography.Text> },
+        { key: 'downloads', label: 'Скачивания', children: <DownloadCount count={application.download_count} /> },
         { key: 'created', label: 'Создано', children: date(application.created_at) }, { key: 'updated', label: 'Изменено', children: date(application.updated_at) },
       ]} />
     </Card>}

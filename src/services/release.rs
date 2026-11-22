@@ -90,6 +90,7 @@ impl ReleaseManagement {
             published_at: None,
             artifact_count: 0,
             total_size_bytes: 0,
+            download_count: 0,
         };
         let mut tx = self.repository.write().await?;
         authorize(&mut tx, actor).await?;

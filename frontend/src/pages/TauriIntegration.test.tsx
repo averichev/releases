@@ -7,7 +7,7 @@ import type { TauriSettings } from '../api/tauri';
 import { command, signer } from '../integrations/tauri';
 import CodeBlock from '../integrations/CodeBlock';
 import TauriIntegration from './TauriIntegration';
-const application: Application = {id: 'app-id', slug: 'product', name: 'Продукт', description: '', visibility: 'public', status: 'active', created_at: 1, updated_at: 1, icon_url: null};
+const application: Application = { download_count: 0,id: 'app-id', slug: 'product', name: 'Продукт', description: '', visibility: 'public', status: 'active', created_at: 1, updated_at: 1, icon_url: null};
 const endpoint = 'https://updates.example.test/api/v1/updates/tauri/product/{{target}}/{{arch}}/{{current_version}}';
 function settings(key: string | null = null): TauriSettings {
   return {public_key: key, public_base_url: 'https://updates.example.test', endpoint,

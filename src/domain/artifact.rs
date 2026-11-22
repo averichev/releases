@@ -12,6 +12,8 @@ pub const TARGETS: &[&str] = &[
 pub const FILE_TYPES: &[&str] = &[
     "exe", "msi", "bin", "zip", "tar.gz", "dmg", "appimage", "deb", "rpm",
 ];
+// Keep the existing updater code and API field: this is the artifact's single classification.
+pub const ARTIFACT_TYPES: &[&str] = &["executable", "installer", "updater", "archive"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Artifact {
@@ -27,6 +29,7 @@ pub struct Artifact {
     pub distribution_role: String,
     pub updater_signature: Option<String>,
     pub standalone_signature: Option<String>,
+    pub download_count: i64,
 }
 pub struct UploadMetadata {
     pub filename: String,
@@ -52,7 +55,7 @@ pub fn valid_file_type(value: &str) -> bool {
         && !value.contains("..")
 }
 /// Format is a server-normalized metadata token, not a malware/content verdict.
-/// Unknown extensions remain supported. Extensionless files need an explicit type.
+/// Unknown extensions remain supported. Extensionless files default to bin.
 pub fn file_type(filename: &str, explicit: Option<&str>) -> Option<String> {
     let lower = filename.to_ascii_lowercase();
     let detected = ["tar.gz", "tar.xz", "tar.bz2", "tar.zst"]
@@ -71,6 +74,6 @@ pub fn file_type(filename: &str, explicit: Option<&str>) -> Option<String> {
     {
         return None;
     }
-    let value = explicit.or(detected)?;
+    let value = explicit.or(detected).unwrap_or_else(|| "bin".into());
     valid_file_type(&value).then_some(value)
 }

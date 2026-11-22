@@ -252,6 +252,11 @@ def main():
                 assert int(head.headers["Content-Length"]) == len(download) and not head.read()
             with build_opener().open(Request(download_url, headers={"Range": "bytes=1-3"})) as partial:
                 assert partial.status == 206 and partial.read() == download[1:4]
+            counted_app, _ = call(application_path)
+            counted_release, _ = call(published_path)
+            counted_files, _ = call(published_path + "/artifacts")
+            assert counted_app["download_count"] == counted_release["download_count"] == 1
+            assert sum(artifact["download_count"] for artifact in counted_files) == 1
             update, _ = call("/api/v1/updates/tauri/catalog-smoke/windows/x86_64/1.0.0", opener=build_opener())
             assert update["url"] == download_url and update["signature"] == signature.decode()
             no_update, _ = call("/api/v1/updates/tauri/catalog-smoke/windows/x86_64/2.0.0", opener=build_opener(), expected=204)
@@ -273,6 +278,43 @@ def main():
             assert latest_bytes == b"package"
             choice, choice_headers = call("/catalog-smoke/latest", opener=build_opener())
             assert choice == page and choice_headers["Content-Type"].startswith("text/html")
+            # Universal distribution: one release, explicit types, no extra manifests or signatures.
+            universal, _ = call(application_path + "/releases", "POST", {"version": "0.5.0"}, recovered["csrf_token"], 201)
+            universal_path = application_path + "/releases/" + universal["id"]
+            variants = [
+                ("windows-x86_64", "mockport.exe", "executable", b"MZ standalone executable"),
+                ("linux-x86_64", "mockport", "executable", b"\x7fELF standalone executable"),
+                ("linux-aarch64", "mockport-aarch64", "executable", b"\x7fELF arm executable"),
+                ("windows-x86_64", "MockPort-Setup.exe", "installer", b"MZ installer"),
+                ("linux-x86_64", "mockport.tar.gz", "archive", b"archive contents"),
+            ]
+            for target, filename, kind, contents in variants:
+                multipart = (f'--SMOKE\r\nContent-Disposition: form-data; name="target"\r\n\r\n{target}\r\n'
+                             f'--SMOKE\r\nContent-Disposition: form-data; name="distribution_role"\r\n\r\n{kind}\r\n'
+                             f'--SMOKE\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n\r\n').encode() + contents + b"\r\n--SMOKE--\r\n"
+                artifact, _ = call(universal_path + "/artifacts", "POST", multipart, recovered["csrf_token"], 201, content_type="multipart/form-data; boundary=SMOKE")
+                assert artifact["filename"] == filename and artifact["distribution_role"] == kind
+                assert artifact["sha256"] == hashlib.sha256(contents).hexdigest()
+                assert not artifact["signature_present"] and not artifact["standalone_signature_present"]
+                if filename == "mockport":
+                    assert artifact["file_type"] == "bin"
+                data, _ = call(universal_path + "/artifacts/" + artifact["id"] + "/download")
+                assert data == contents
+            call(universal_path + "/artifacts", "POST", multipart, recovered["csrf_token"], 409, content_type="multipart/form-data; boundary=SMOKE")
+            ready, _ = call(universal_path + "/validate-publication", "POST", {}, recovered["csrf_token"])
+            assert ready["validation"]["state"] == "ready"
+            call(universal_path + "/publish", "POST", {"expected_release_revision": ready["release_revision"]}, recovered["csrf_token"])
+            for target, filename, kind, contents in variants:
+                data, _ = call(f"/catalog-smoke/0.5.0/{target}?type={kind}", opener=build_opener())
+                assert data == contents
+                if kind != "installer":
+                    data, _ = call(f"/catalog-smoke/latest?target={target}&type={kind}", opener=build_opener())
+                    assert data == contents
+            ambiguous, _ = call("/catalog-smoke/latest?type=executable", opener=build_opener(), expected=409)
+            assert ambiguous["error"]["code"] == "ambiguous_artifact"
+            # Adding generic files cannot replace the existing signed Tauri update.
+            update, _ = call("/api/v1/updates/tauri/catalog-smoke/windows/x86_64/1.0.0", opener=build_opener())
+            assert update["version"] == "2.0.0" and update["signature"] == signature.decode()
             call(application_path, "PATCH", {"visibility": "private"}, recovered["csrf_token"])
             call("/catalog-smoke/manifest.json", opener=build_opener(), expected=404)
             call(application_path + "/manifests/preview")
@@ -292,7 +334,7 @@ def main():
             logs = log_path.read_text()
             assert "Veruna Releases stopped" in logs
             assert all(value not in logs for value in secret_values), "Secret leaked into logs"
-            print("Smoke passed: standalone assets, CLI recovery, sessions/CSRF, catalog, sanitized SVG icons, uploads/SHA-256, publication/history, platform latest, manifest v2, downloads/HEAD/Range, Tauri, immutability, nested routes, safe logs, WAL, migrations, SIGTERM.")
+            print("Smoke passed: standalone assets, CLI recovery, sessions/CSRF, catalog, sanitized SVG icons, uploads/SHA-256, universal artifact types/extensionless binaries, publication/history, filtered/ambiguous latest, manifest v2, downloads/HEAD/Range, Tauri, immutability, nested routes, safe logs, WAL, migrations, SIGTERM.")
         finally:
             if process.poll() is None:
                 process.kill()

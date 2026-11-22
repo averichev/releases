@@ -35,6 +35,7 @@ pub struct Release {
     pub published_at: Option<i64>,
     pub artifact_count: i64,
     pub total_size_bytes: i64,
+    pub download_count: i64,
 }
 pub struct ReleaseInput {
     pub version: String,

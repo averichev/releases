@@ -107,4 +107,25 @@ impl DistributionRepository {
     pub async fn public_active(&self, id: &str) -> Result<bool> {
         Ok(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM applications WHERE id=? AND status='active' AND visibility='public'").bind(id).fetch_one(&self.pool).await? == 1)
     }
+    /// The authorization check and increment share one SQLite write statement.
+    pub async fn record_download(&self, app: &str, release: &str, artifact: &str) -> Result<()> {
+        let result = sqlx::query(
+            "INSERT INTO artifact_download_counts(artifact_id,download_count)
+             SELECT a.id,1 FROM artifacts a
+             JOIN releases r ON r.id=a.release_id
+             JOIN applications p ON p.id=r.application_id
+             WHERE a.id=? AND r.id=? AND p.id=? AND r.status='published'
+               AND p.status='active' AND p.visibility='public'
+             ON CONFLICT(artifact_id) DO UPDATE SET download_count=download_count+1",
+        )
+        .bind(artifact)
+        .bind(release)
+        .bind(app)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(ServiceError::NotFound);
+        }
+        Ok(())
+    }
 }

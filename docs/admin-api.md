@@ -53,7 +53,9 @@ PATCH принимает непустое подмножество name, descrip
 
 ## DTO
 
-Application DTO содержит `id`, `slug`, `name`, `description`, `visibility`, `status`, `created_at`, `updated_at`, `icon_url`. Даты — Unix seconds UTC. `icon_url` — null либо путь от корня `/api/v1/admin/applications/{id}/icon?v={opaque-version}`. Путь хранения и внутренний icon_key не входят в DTO. Публичность private/public и статус active/archived — независимые свойства.
+Application DTO содержит `id`, `slug`, `name`, `description`, `visibility`, `status`, `created_at`, `updated_at`, `icon_url`, `download_count`. Даты — Unix seconds UTC. `icon_url` — null либо путь от корня `/api/v1/admin/applications/{id}/icon?v={opaque-version}`. Путь хранения и внутренний icon_key не входят в DTO. Публичность private/public и статус active/archived — независимые свойства.
+
+`download_count` — целое неотрицательное число начатых публичных скачиваний; присутствует также в административных Release DTO и Artifact DTO, включая списки. Итог версии — сумма всех её артефактов, итог приложения — сумма всех версий независимо от фильтров и пагинации. Чтение доступно admin/operator под существующей session-защитой; публичные DTO и манифесты не включают статистику. Правила учёта и ограничения: [скачивания](public-distribution.md#счётчики-скачиваний).
 
 ## Иконки
 

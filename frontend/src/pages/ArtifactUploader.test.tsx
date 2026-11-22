@@ -13,6 +13,7 @@ it('explains a proxy upload limit and keeps the selected file for retry', async 
   render(<ArtifactUploader applicationId="application" releaseId="release" artifacts={[]} options={{
     targets: ['linux-x86_64'], file_types: ['deb'], max_file_bytes: 2147483648, upload_idle_seconds: 120,
   }} onChange={onChange} onBusy={onBusy} />);
+  await chooseType('Установочный пакет');
   fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Целевая платформа' }));
   fireEvent.click(await screen.findByText('Linux x64'));
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -27,7 +28,7 @@ it('explains a proxy upload limit and keeps the selected file for retry', async 
 });
 
 const options = { targets: ['windows-x86_64'], file_types: ['exe', 'msi'], max_file_bytes: 1024, upload_idle_seconds: 120 };
-const existing = { id: 'installer', release_id: 'release', filename: 'installer.exe', target: 'windows-x86_64', file_type: 'exe', distribution_role: 'installer' as const, signature_present: false, size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1 };
+const existing = { download_count: 0, id: 'installer', release_id: 'release', filename: 'installer.exe', target: 'windows-x86_64', file_type: 'exe', distribution_role: 'installer' as const, signature_present: false, size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1 };
 it('uploads a macOS Universal package using the target offered by the server', async () => {
   let sent: FormData | undefined;
   class AcceptedXhr {
@@ -37,6 +38,7 @@ it('uploads a macOS Universal package using the target offered by the server', a
   }
   vi.stubGlobal('XMLHttpRequest', AcceptedXhr);
   render(<ArtifactUploader applicationId="app" releaseId="release" artifacts={[]} options={{targets: ['darwin-universal'], file_types: ['dmg'], max_file_bytes: 1024, upload_idle_seconds: 120}} onChange={vi.fn()} onBusy={vi.fn()} />);
+  await chooseType('Установочный пакет');
   fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Целевая платформа'}));
   fireEvent.click(await screen.findByText('macOS Universal (Intel + Apple Silicon)'));
   fireEvent.change(document.querySelector('input[type="file"]')!, {target: {files: [new File(['new'], 'product.dmg')]}});
@@ -47,14 +49,18 @@ it('uploads a macOS Universal package using the target offered by the server', a
   expect((sent?.get('file') as File).name).toBe('product.dmg');
 });
 async function chooseFile() {
+  await chooseType('Установочный пакет');
   fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Целевая платформа' }));
   fireEvent.click(await screen.findByText('Windows x64'));
   fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['new'], 'updater.exe')] } });
   await screen.findByText('updater.exe · 3 B · EXE');
 }
 async function chooseUpdater() {
-  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Назначение' }));
-  fireEvent.click(await screen.findByText('Пакет обновления (Tauri Updater)'));
+  await chooseType('Пакет обновления (Tauri Updater)');
+}
+async function chooseType(label: string) {
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Тип артефакта' }));
+  fireEvent.click(await screen.findByText(label, {selector: '.ant-select-item-option-content'}));
 }
 it('sends role and signature with the initial upload even when installer has the same format', async () => {
   let sent: FormData | undefined;
@@ -95,5 +101,34 @@ it.each(['artifact_exists', 'updater_signature_required'])('explains %s returned
   await chooseFile();
   fireEvent.click(screen.getByRole('button', { name: 'Загрузить файл' }));
   const alert = await screen.findByRole('alert');
-  expect(alert.textContent).toMatch(code === 'artifact_exists' ? /назначением уже есть/ : /корректный файл .sig/);
+  expect(alert.textContent).toMatch(code === 'artifact_exists' ? /типом уже есть/ : /корректный файл .sig/);
+});
+
+it.each([
+  ['Исполняемый файл', 'executable', 'mockport.exe'],
+  ['Исполняемый файл', 'executable', 'mockport'],
+  ['Установочный пакет', 'installer', 'MockPort-Setup.exe'],
+  ['Архив', 'archive', 'mockport.tar.gz'],
+])('uploads %s %s %s without signing keys or signatures', async (label, kind, filename) => {
+  let sent: FormData | undefined;
+  class AcceptedXhr {
+    upload = {}; status = 201; responseText = '{}'; onload?: () => void;
+    open() {} setRequestHeader() {} send(data: FormData) { sent = data; this.onload?.(); }
+  }
+  vi.stubGlobal('XMLHttpRequest', AcceptedXhr);
+  render(<ArtifactUploader applicationId="app" releaseId="release" artifacts={kind === 'executable' ? [existing] : []} options={options} published onChange={vi.fn()} onBusy={vi.fn()} />);
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Целевая платформа'}));
+  fireEvent.click(await screen.findByText('Windows x64', {selector: '.ant-select-item-option-content'}));
+  fireEvent.change(document.querySelector('input[type="file"]')!, {target: {files: [new File(['new'], filename)]}});
+  // The type is explicit; selecting a filename never silently classifies EXE as installer.
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Загрузить файл'}) as HTMLButtonElement).disabled).toBe(true));
+  await chooseType(label);
+  expect(screen.queryByLabelText('Подпись Tauri (.sig)')).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
+  await screen.findByText('Файл загружен и сохранён.');
+  expect(sent?.get('distribution_role')).toBe(kind);
+  expect((sent?.get('file') as File).name).toBe(filename);
+  expect(sent?.has('signature')).toBe(false);
+  expect(sent?.has('standalone_signature')).toBe(false);
+  expect(sent?.has('file_type')).toBe(false);
 });

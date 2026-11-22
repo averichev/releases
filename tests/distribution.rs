@@ -181,12 +181,361 @@ impl TestApp {
     fn url(&self, r: &Release, a: &Artifact) -> String {
         self.state.distribution.artifact_path("product", r, a)
     }
+    async fn upload_type(&self, r: &Release, target: &str, name: &str, kind: &str) -> Value {
+        let body = format!(
+            "--FILE\r\nContent-Disposition: form-data; name=\"target\"\r\n\r\n{target}\r\n--FILE\r\nContent-Disposition: form-data; name=\"distribution_role\"\r\n\r\n{kind}\r\n--FILE\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n\r\n0123456789\r\n--FILE--\r\n"
+        );
+        let response = self
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/admin/applications/{}/releases/{}/artifacts",
+                        self.app, r.id
+                    ))
+                    .header("origin", &self.config.auth.public_origin)
+                    .header("x-veruna-request", "1")
+                    .header("cookie", format!("veruna_session={}", self.token))
+                    .header("x-csrf-token", secrets::csrf(&self.token))
+                    .header("content-type", "multipart/form-data; boundary=FILE")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let value = json_body(response).await;
+        assert_eq!(status, 201, "{value}");
+        value
+    }
 }
 async fn bytes(r: Response) -> Vec<u8> {
     r.into_body().collect().await.unwrap().to_bytes().to_vec()
 }
 async fn json_body(r: Response) -> Value {
     serde_json::from_slice(&bytes(r).await).unwrap()
+}
+
+#[tokio::test]
+async fn universal_artifact_types_share_one_release_and_keep_original_bytes_without_keys() {
+    use sha2::{Digest, Sha256};
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("0.5.0").await;
+    let variants = [
+        ("windows-x86_64", "mockport.exe", "executable", "exe"),
+        ("linux-x86_64", "mockport", "executable", "bin"),
+        ("linux-aarch64", "mockport-aarch64", "executable", "bin"),
+        ("windows-x86_64", "MockPort-Setup.exe", "installer", "exe"),
+        ("linux-x86_64", "mockport.tar.gz", "archive", "tar.gz"),
+    ];
+    let mut files = Vec::new();
+    for (target, name, kind, format) in variants {
+        let dto = t.upload_type(&r, target, name, kind).await;
+        assert_eq!(dto["filename"], name);
+        assert_eq!(dto["distribution_role"], kind);
+        assert_eq!(dto["file_type"], format);
+        assert_eq!(dto["signature_present"], false);
+        assert_eq!(dto["standalone_signature_present"], false);
+        assert_eq!(
+            dto["sha256"],
+            format!("{:x}", Sha256::digest(b"0123456789"))
+        );
+        files.push(dto);
+    }
+    t.publish(&r).await;
+    let app = t.state.applications.get(&t.app).await.unwrap();
+    assert!(
+        t.state
+            .tauri_integration
+            .details(&t.app, false)
+            .await
+            .unwrap()
+            .public_key
+            .is_none()
+    );
+    assert!(app.standalone_public_key.is_none());
+    assert!(app.product_id.is_none());
+    for ((target, _, kind, format), dto) in variants.iter().zip(&files) {
+        let path = format!(
+            "/product/releases/0.5.0/artifacts/{}/download",
+            dto["id"].as_str().unwrap()
+        );
+        let response = t.get("GET", &path, &[]).await;
+        assert_eq!(response.status(), 200);
+        assert!(
+            response.headers()["content-disposition"]
+                .to_str()
+                .unwrap()
+                .contains(dto["filename"].as_str().unwrap())
+        );
+        assert_eq!(bytes(response).await, b"0123456789");
+        for method in ["GET", "HEAD"] {
+            for latest in [
+                format!("/product/latest?target={target}&type={kind}&format={format}"),
+                format!("/product/latest/{target}?purpose={kind}&format={format}"),
+                format!("/product/0.5.0/{target}?type={kind}&format={format}"),
+            ] {
+                let response = t.get(method, &latest, &[]).await;
+                assert_eq!(response.status(), 307, "{latest}");
+                assert_eq!(response.headers()["location"], path);
+                assert_eq!(response.headers()["cache-control"], "no-store");
+            }
+        }
+    }
+    // Old target-only links keep selecting the installer even when a standalone EXE exists.
+    assert!(
+        t.get("GET", "/product/latest/windows-x86_64", &[])
+            .await
+            .headers()["location"]
+            .to_str()
+            .unwrap()
+            .contains(files[3]["id"].as_str().unwrap())
+    );
+    for source in [
+        "/product/manifest.json?limit=1",
+        "/api/v1/public/applications/product",
+    ] {
+        let doc = json_body(t.get("GET", source, &[]).await).await;
+        assert_eq!(
+            doc["latest_by_type"]["executable"]["linux-x86_64"]["artifacts"][0]["purpose"],
+            "executable"
+        );
+        assert_eq!(
+            doc["latest_by_type"]["archive"]["linux-x86_64"]["version"],
+            "0.5.0"
+        );
+        assert_eq!(
+            doc["latest_by_target"]["windows-x86_64"]["artifacts"][0]["purpose"],
+            "installer"
+        );
+    }
+    let history = json_body(
+        t.get("GET", "/api/v1/public/applications/product/releases", &[])
+            .await,
+    )
+    .await;
+    assert_eq!(
+        history["items"][0]["artifacts"].as_array().unwrap().len(),
+        5
+    );
+    // Adding an ordinary executable to a published release requires neither kind of signature.
+    t.upload_type(&r, "darwin-aarch64", "mockport-macos", "executable")
+        .await;
+}
+
+#[tokio::test]
+async fn latest_filters_type_target_and_format_before_selecting_semver_and_reports_ambiguity() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let old = t.create("0.5.0").await;
+    let executable = t
+        .upload_type(&old, "linux-x86_64", "mockport", "executable")
+        .await;
+    let tar = t
+        .upload_type(&old, "linux-x86_64", "mockport.tar.gz", "archive")
+        .await;
+    t.upload_type(&old, "linux-aarch64", "mockport-arm", "executable")
+        .await;
+    t.publish(&old).await;
+    let new = t.create("0.10.0").await;
+    t.upload_type(&new, "windows-x86_64", "setup.exe", "installer")
+        .await;
+    let zip = t
+        .upload_type(&new, "linux-x86_64", "mockport.zip", "archive")
+        .await;
+    t.publish(&new).await;
+    for (version, kind, format, file) in [
+        ("0.5.0", "executable", "bin", &executable),
+        ("0.5.0", "archive", "tar.gz", &tar),
+        ("0.10.0", "archive", "zip", &zip),
+    ] {
+        let response = t
+            .get(
+                "GET",
+                &format!("/product/latest/linux-x86_64?type={kind}&format={format}"),
+                &[],
+            )
+            .await;
+        assert_eq!(response.status(), 307);
+        assert_eq!(
+            response.headers()["location"],
+            format!(
+                "/product/releases/{version}/artifacts/{}/download",
+                file["id"].as_str().unwrap()
+            )
+        );
+    }
+    t.upload_type(&new, "linux-x86_64", "mockport.tar.gz", "archive")
+        .await;
+    for query in ["type=executable", "target=linux-x86_64&type=archive"] {
+        let response = t.get("GET", &format!("/product/latest?{query}"), &[]).await;
+        assert_eq!(response.status(), 409);
+        let error = json_body(response).await;
+        assert_eq!(error["error"]["code"], "ambiguous_artifact");
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("target, type (or purpose), and format")
+        );
+    }
+    // An explicit unique type works without a target. Unknown or conflicting filters fail closed.
+    assert_eq!(
+        t.get("GET", "/product/latest?type=installer", &[])
+            .await
+            .status(),
+        307
+    );
+    for (query, status) in [
+        ("type=unknown", 422),
+        ("type=executable&purpose=installer", 400),
+        ("platform=linux", 400),
+        ("target=linux-x86_64&type=installer", 404),
+    ] {
+        assert_eq!(
+            t.get("GET", &format!("/product/latest?{query}"), &[])
+                .await
+                .status(),
+            status
+        );
+    }
+    let draft = t.create("8.0.0").await;
+    t.upload_type(&draft, "linux-x86_64", "draft", "executable")
+        .await;
+    let pre = t.create("9.0.0-rc.1").await;
+    t.upload_type(&pre, "linux-x86_64", "preview", "executable")
+        .await;
+    t.publish(&pre).await;
+    let response = t
+        .get(
+            "GET",
+            "/product/latest?target=linux-x86_64&type=executable",
+            &[],
+        )
+        .await;
+    assert!(
+        response.headers()["location"]
+            .to_str()
+            .unwrap()
+            .contains(executable["id"].as_str().unwrap())
+    );
+}
+
+#[tokio::test]
+async fn artifact_type_edits_keep_authorization_conflicts_and_published_immutability() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("0.5.0").await;
+    let exe = t
+        .upload_type(&r, "windows-x86_64", "app.exe", "executable")
+        .await;
+    let installer = t
+        .upload_type(&r, "windows-x86_64", "setup.exe", "installer")
+        .await;
+    let path = format!(
+        "/api/v1/admin/applications/{}/releases/{}/artifacts/{}/updater",
+        t.app,
+        r.id,
+        installer["id"].as_str().unwrap()
+    );
+    let payload = json!({"distribution_role":"archive"});
+    assert_eq!(
+        t.admin("PUT", &path, payload.clone(), None, true)
+            .await
+            .status(),
+        401
+    );
+    assert_eq!(
+        t.admin("PUT", &path, payload.clone(), Some(&t.token), false)
+            .await
+            .status(),
+        403
+    );
+    t.state
+        .users
+        .create(
+            &t.actor,
+            "operator",
+            Role::Operator,
+            Some("test-password-123".into()),
+        )
+        .await
+        .unwrap();
+    let operator = t
+        .state
+        .authentication
+        .login("operator", "test-password-123".into(), None)
+        .await
+        .unwrap()
+        .token;
+    assert_eq!(
+        t.admin("PUT", &path, payload.clone(), Some(&operator), true)
+            .await
+            .status(),
+        403
+    );
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &path,
+            json!({"distribution_role":"executable"}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        409
+    );
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &path,
+            json!({"distribution_role":"unknown"}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        422
+    );
+    let response = t
+        .admin("PUT", &path, payload.clone(), Some(&t.token), true)
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(json_body(response).await["distribution_role"], "archive");
+    t.publish(&r).await;
+    assert_eq!(
+        t.admin(
+            "PUT",
+            &path,
+            json!({"distribution_role":"installer"}),
+            Some(&t.token),
+            true
+        )
+        .await
+        .status(),
+        409
+    );
+    // Database uniqueness and REPLACE protection apply to new types too.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", t.config.database.path.display()))
+        .await
+        .unwrap();
+    let a = t
+        .state
+        .artifacts
+        .list(&t.app, &r.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|a| a.id == exe["id"].as_str().unwrap())
+        .unwrap();
+    let result = sqlx::query("INSERT OR REPLACE INTO artifacts SELECT ?,release_id,filename,target,file_type,size_bytes,sha256,?,created_at,distribution_role,updater_signature,standalone_signature FROM artifacts WHERE id=?")
+        .bind(uuid::Uuid::new_v4().to_string()).bind(format!("{}.blob", uuid::Uuid::new_v4().simple())).bind(&a.id).execute(&pool).await;
+    assert!(result.is_err());
+    assert_eq!(
+        t.state.artifacts.list(&t.app, &r.id).await.unwrap().len(),
+        2
+    );
 }
 
 #[tokio::test]
@@ -1885,6 +2234,8 @@ async fn updater_finds_older_signed_package_when_newer_release_has_only_another_
     t.publish(&win).await;
     let mac = t.create("0.6.0").await;
     t.upload(&mac, "darwin-aarch64", "product.dmg").await;
+    t.upload_type(&mac, "windows-x86_64", "product.exe", "executable")
+        .await;
     t.publish(&mac).await;
     let response = json_body(
         t.get(
@@ -1906,5 +2257,408 @@ async fn updater_finds_older_signed_package_when_newer_release_has_only_another_
         .await
         .status(),
         204
+    );
+}
+
+#[tokio::test]
+async fn download_counts_track_starts_with_identical_direct_and_nginx_semantics() {
+    for mode in [DeliveryMode::Direct, DeliveryMode::Nginx] {
+        let t = TestApp::new(mode).await;
+        let r = t.create("1.0.0").await;
+        let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+        t.publish(&r).await;
+        let url = t.url(&r, &a);
+        let head = t.get("HEAD", &url, &[]).await;
+        assert_eq!(head.status(), 200);
+        let etag = head.headers()["etag"].to_str().unwrap().to_owned();
+        drop(head);
+        for (headers, status) in [
+            (vec![("if-none-match", etag.as_str())], 304),
+            (vec![("if-match", "\"obsolete\"")], 412),
+            (vec![("range", "bytes=999-")], 416),
+            (vec![("range", "bytes=invalid")], 416),
+            (
+                vec![("range", "bytes=2-5")],
+                if mode == DeliveryMode::Direct {
+                    206
+                } else {
+                    200
+                },
+            ),
+            (
+                vec![("range", "bytes=-3")],
+                if mode == DeliveryMode::Direct {
+                    206
+                } else {
+                    200
+                },
+            ),
+        ] {
+            let response = t.get("GET", &url, &headers).await;
+            assert_eq!(response.status().as_u16(), status);
+            bytes(response).await;
+        }
+        assert_eq!(
+            t.get("GET", "/product/latest/windows-x86_64", &[])
+                .await
+                .status(),
+            307
+        );
+        assert_eq!(
+            t.get("GET", "/product/1.0.0/windows-x86_64", &[])
+                .await
+                .status(),
+            307
+        );
+        assert_eq!(
+            t.get("GET", "/product/manifest.json", &[]).await.status(),
+            200
+        );
+        let admin_file = format!(
+            "/api/v1/admin/applications/{}/releases/{}/artifacts/{}/download",
+            t.app, r.id, a.id
+        );
+        assert_eq!(
+            bytes(
+                t.admin("GET", &admin_file, Value::Null, Some(&t.token), false)
+                    .await
+            )
+            .await,
+            b"0123456789"
+        );
+        assert_eq!(
+            t.state
+                .applications
+                .get(&t.app)
+                .await
+                .unwrap()
+                .download_count,
+            0
+        );
+        for headers in [
+            vec![],
+            vec![("range", "bytes=0-3")],
+            vec![("range", "bytes=4-"), ("if-range", "\"obsolete\"")],
+            vec![("range", "bytes=0-2,4-5")],
+            vec![("range", "bytes=-100")],
+        ] {
+            let response = t.get("GET", &url, &headers).await;
+            assert!(response.status().is_success());
+            // A disconnect still represents an accepted start.
+            drop(response);
+        }
+        assert_eq!(
+            t.state
+                .applications
+                .get(&t.app)
+                .await
+                .unwrap()
+                .download_count,
+            5
+        );
+        assert_eq!(
+            t.state
+                .releases
+                .get(&t.app, &r.id)
+                .await
+                .unwrap()
+                .download_count,
+            5
+        );
+        assert_eq!(
+            t.state.artifacts.list(&t.app, &r.id).await.unwrap()[0].download_count,
+            5
+        );
+        // Reading statistics and restarting infrastructure never reset the value.
+        let pool = initialize(&t.config).await.unwrap();
+        let restarted = application_state(pool.clone(), &t.config).await.unwrap();
+        assert_eq!(
+            restarted
+                .applications
+                .get(&t.app)
+                .await
+                .unwrap()
+                .download_count,
+            5
+        );
+        pool.close().await;
+        // Missing storage is rejected before accounting, including Nginx delegation.
+        tokio::fs::remove_file(t.config.storage.directory.join(&a.storage_key))
+            .await
+            .unwrap();
+        assert_eq!(t.get("GET", &url, &[]).await.status(), 503);
+        assert_eq!(
+            t.state
+                .applications
+                .get(&t.app)
+                .await
+                .unwrap()
+                .download_count,
+            5
+        );
+    }
+}
+
+#[tokio::test]
+async fn download_counts_roll_up_by_ownership_and_stay_behind_the_admin_gate() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let old = t.create("1.0.0").await;
+    let installer = t.upload(&old, "windows-x86_64", "setup.exe").await;
+    let archive = t.upload_type(&old, "any", "bundle.zip", "archive").await;
+    t.publish(&old).await;
+    let new = t.create("2.0.0").await;
+    let binary = t
+        .upload_type(&new, "linux-x86_64", "program", "executable")
+        .await;
+    t.publish(&new).await;
+    let draft = t.create("3.0.0").await;
+    for (release, artifact, count) in [
+        (&old, installer.id.as_str(), 1),
+        (&old, archive["id"].as_str().unwrap(), 2),
+        (&new, binary["id"].as_str().unwrap(), 3),
+    ] {
+        let path = format!(
+            "/product/releases/{}/artifacts/{artifact}/download",
+            release.version
+        );
+        for _ in 0..count {
+            assert_eq!(bytes(t.get("GET", &path, &[]).await).await, b"0123456789");
+        }
+    }
+    let base = format!("/api/v1/admin/applications/{}", t.app);
+    for path in [
+        base.clone(),
+        format!("{base}/releases"),
+        format!("{base}/releases/{}/artifacts", old.id),
+    ] {
+        assert_eq!(
+            t.admin("GET", &path, Value::Null, None, false)
+                .await
+                .status(),
+            401
+        );
+    }
+    t.state
+        .users
+        .create(
+            &t.actor,
+            "reader",
+            Role::Operator,
+            Some("reader-password-123".into()),
+        )
+        .await
+        .unwrap();
+    let operator = t
+        .state
+        .authentication
+        .login("reader", "reader-password-123".into(), None)
+        .await
+        .unwrap();
+    for token in [&t.token, &operator.token] {
+        let app = json_body(t.admin("GET", &base, Value::Null, Some(token), false).await).await;
+        assert_eq!(app["download_count"], 6);
+        let catalog = json_body(
+            t.admin(
+                "GET",
+                "/api/v1/admin/applications",
+                Value::Null,
+                Some(token),
+                false,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(catalog["items"][0]["download_count"], 6);
+        let releases = json_body(
+            t.admin(
+                "GET",
+                &format!("{base}/releases?per_page=1&page=2"),
+                Value::Null,
+                Some(token),
+                false,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(releases["items"][0]["id"], new.id);
+        assert_eq!(releases["items"][0]["download_count"], 3);
+        let release = json_body(
+            t.admin(
+                "GET",
+                &format!("{base}/releases/{}", old.id),
+                Value::Null,
+                Some(token),
+                false,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(release["download_count"], 3);
+        let artifacts = json_body(
+            t.admin(
+                "GET",
+                &format!("{base}/releases/{}/artifacts", old.id),
+                Value::Null,
+                Some(token),
+                false,
+            )
+            .await,
+        )
+        .await;
+        let artifacts = artifacts.as_array().unwrap();
+        assert_eq!(
+            artifacts.iter().find(|a| a["id"] == installer.id).unwrap()["download_count"],
+            1
+        );
+        assert_eq!(
+            artifacts.iter().find(|a| a["id"] == archive["id"]).unwrap()["download_count"],
+            2
+        );
+    }
+    assert_eq!(
+        t.state
+            .releases
+            .get(&t.app, &draft.id)
+            .await
+            .unwrap()
+            .download_count,
+        0
+    );
+    let other = t
+        .state
+        .applications
+        .create(
+            &t.actor,
+            NewApplication {
+                slug: "other".into(),
+                name: "Other".into(),
+                description: String::new(),
+                visibility: Visibility::Public,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(other.download_count, 0);
+    assert_eq!(
+        t.state
+            .applications
+            .get(&other.id)
+            .await
+            .unwrap()
+            .download_count,
+        0
+    );
+    let public = json_body(
+        t.get("GET", "/api/v1/public/applications/product", &[])
+            .await,
+    )
+    .await;
+    assert!(public.get("download_count").is_none());
+    assert!(
+        public["latest_by_target"]["windows-x86_64"]["artifacts"][0]
+            .get("download_count")
+            .is_none()
+    );
+    let stale = t
+        .state
+        .distribution
+        .version("product", "1.0.0", &Default::default(), Some(&installer.id))
+        .await
+        .unwrap();
+    t.state
+        .applications
+        .update(
+            &t.actor,
+            &t.app,
+            ApplicationChanges {
+                visibility: Some(Visibility::Private),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        t.state.distribution.record_download(&stale).await,
+        Err(veruna_releases::services::error::ServiceError::NotFound)
+    ));
+    assert_eq!(
+        t.get("GET", &t.url(&old, &installer), &[]).await.status(),
+        404
+    );
+    t.state
+        .applications
+        .set_status(&t.actor, &t.app, Status::Archived)
+        .await
+        .unwrap();
+    assert_eq!(
+        t.state
+            .applications
+            .get(&t.app)
+            .await
+            .unwrap()
+            .download_count,
+        6
+    );
+}
+
+#[tokio::test]
+async fn download_counts_increment_atomically_without_changing_publication_or_manifests() {
+    let t = TestApp::new(DeliveryMode::Direct).await;
+    let r = t.create("1.0.0").await;
+    let a = t.upload(&r, "windows-x86_64", "setup.exe").await;
+    t.publish(&r).await;
+    let before = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    let manifest = t.get("GET", "/product/manifest.json", &[]).await;
+    let etag = manifest.headers()["etag"].to_str().unwrap().to_owned();
+    drop(manifest);
+    let download = t
+        .state
+        .distribution
+        .version("product", "1.0.0", &Default::default(), Some(&a.id))
+        .await
+        .unwrap();
+    let results = futures_util::future::join_all(
+        (0..32).map(|_| t.state.distribution.record_download(&download)),
+    )
+    .await;
+    for result in results {
+        result.unwrap();
+    }
+    let after = t.state.releases.get(&t.app, &r.id).await.unwrap();
+    assert_eq!(after.download_count, 32);
+    assert_eq!(
+        t.state
+            .applications
+            .get(&t.app)
+            .await
+            .unwrap()
+            .download_count,
+        32
+    );
+    assert_eq!(
+        t.state.artifacts.list(&t.app, &r.id).await.unwrap()[0].download_count,
+        32
+    );
+    assert_eq!(
+        (after.revision, after.updated_at, after.published_at),
+        (before.revision, before.updated_at, before.published_at)
+    );
+    assert_eq!(
+        t.get("GET", "/product/manifest.json", &[("if-none-match", &etag)])
+            .await
+            .status(),
+        304
+    );
+    assert!(
+        sqlx::query("UPDATE artifact_download_counts SET download_count=-1")
+            .execute(&t.state.database)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE artifact_download_counts SET download_count=1.5")
+            .execute(&t.state.database)
+            .await
+            .is_err()
     );
 }

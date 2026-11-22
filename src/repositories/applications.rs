@@ -4,6 +4,8 @@ use crate::{
 };
 use sqlx::{QueryBuilder, Sqlite, SqliteConnection, SqlitePool, Transaction};
 
+const SELECT: &str = "SELECT applications.*, (SELECT coalesce(sum(d.download_count),0) FROM releases r JOIN artifacts a ON a.release_id=r.id JOIN artifact_download_counts d ON d.artifact_id=a.id WHERE r.application_id=applications.id) AS download_count FROM applications";
+
 #[derive(sqlx::FromRow)]
 struct StoredApplication {
     id: String,
@@ -18,6 +20,7 @@ struct StoredApplication {
     standalone_public_key: Option<String>,
     product_id: Option<String>,
     product_id_locked: bool,
+    download_count: i64,
 }
 impl StoredApplication {
     fn application(self) -> Result<Application> {
@@ -38,6 +41,7 @@ impl StoredApplication {
             standalone_public_key: self.standalone_public_key,
             product_id: self.product_id,
             product_id_locked: self.product_id_locked,
+            download_count: self.download_count,
         })
     }
 }
@@ -53,7 +57,7 @@ impl ApplicationsRepository {
         Ok(self.pool.begin_with("BEGIN IMMEDIATE").await?)
     }
     pub async fn get(&self, id: &str) -> Result<Application> {
-        let row: StoredApplication = sqlx::query_as("SELECT * FROM applications WHERE id=?")
+        let row: StoredApplication = sqlx::query_as(&format!("{SELECT} WHERE id=?"))
             .bind(id)
             .fetch_optional(&self.pool)
             .await?
@@ -61,7 +65,7 @@ impl ApplicationsRepository {
         row.application()
     }
     pub async fn by_slug_in(c: &mut SqliteConnection, slug: &str) -> Result<Application> {
-        sqlx::query_as::<_, StoredApplication>("SELECT * FROM applications WHERE slug=?")
+        sqlx::query_as::<_, StoredApplication>(&format!("{SELECT} WHERE slug=?"))
             .bind(slug)
             .fetch_optional(c)
             .await?
@@ -69,7 +73,7 @@ impl ApplicationsRepository {
             .application()
     }
     pub async fn get_in(c: &mut SqliteConnection, id: &str) -> Result<Application> {
-        let row: StoredApplication = sqlx::query_as("SELECT * FROM applications WHERE id=?")
+        let row: StoredApplication = sqlx::query_as(&format!("{SELECT} WHERE id=?"))
             .bind(id)
             .fetch_optional(c)
             .await?
@@ -83,7 +87,7 @@ impl ApplicationsRepository {
             .build_query_scalar()
             .fetch_one(&mut *tx)
             .await?;
-        let mut sql = filtered("SELECT * FROM applications", query);
+        let mut sql = filtered(SELECT, query);
         sql.push(" ORDER BY ").push(match query.sort {
             Sort::Name => "name_search",
             Sort::CreatedAt => "created_at",
@@ -124,12 +128,12 @@ impl ApplicationsRepository {
         limit: u32,
         offset: u32,
     ) -> Result<ApplicationPage> {
-        const FILTER: &str = " FROM applications WHERE status='active' AND visibility='public' AND EXISTS (SELECT 1 FROM releases WHERE application_id=applications.id AND status='published')";
-        let total = sqlx::query_scalar(&format!("SELECT count(*){FILTER}"))
+        const FILTER: &str = " WHERE status='active' AND visibility='public' AND EXISTS (SELECT 1 FROM releases WHERE application_id=applications.id AND status='published')";
+        let total = sqlx::query_scalar(&format!("SELECT count(*) FROM applications{FILTER}"))
             .fetch_one(&mut *c)
             .await?;
         let rows: Vec<StoredApplication> = sqlx::query_as(&format!(
-            "SELECT *{FILTER} ORDER BY name_search, slug LIMIT ? OFFSET ?"
+            "{SELECT}{FILTER} ORDER BY name_search, slug LIMIT ? OFFSET ?"
         ))
         .bind(i64::from(limit))
         .bind(i64::from(offset))

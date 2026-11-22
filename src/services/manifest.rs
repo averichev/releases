@@ -2,7 +2,7 @@
 use crate::{
     domain::application::{Status, Visibility},
     services::{
-        distribution::{PublicDistribution, latest_installers},
+        distribution::{PublicDistribution, latest_downloads},
         error::{Result, ServiceError},
     },
 };
@@ -13,16 +13,17 @@ pub struct Manifest {
     pub schema_version: u32,
     pub app: String,
     pub latest_by_target: BTreeMap<String, ManifestRelease>,
+    pub latest_by_type: BTreeMap<String, BTreeMap<String, ManifestRelease>>,
     pub releases: Vec<ManifestRelease>,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ManifestRelease {
     pub version: String,
     pub published_at: String,
     pub notes: String,
     pub artifacts: Vec<ManifestArtifact>,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ManifestArtifact {
     pub id: String,
     pub target: String,
@@ -85,13 +86,21 @@ impl ManifestGeneration {
         let app = &catalog.application;
         let available = app.status == Status::Active && app.visibility == Visibility::Public;
         let mut latest_by_target = BTreeMap::new();
+        let mut latest_by_type = BTreeMap::new();
         // Compute before pagination so an older platform is never hidden by limit.
-        for (target, (release, artifacts)) in latest_installers(&catalog) {
-            latest_by_target.insert(
-                target,
-                self.document(&app.slug, &release, &artifacts, available)
-                    .await?,
-            );
+        for (kind, targets) in latest_downloads(&catalog) {
+            let mut documents = BTreeMap::new();
+            for (target, (release, artifacts)) in targets {
+                documents.insert(
+                    target,
+                    self.document(&app.slug, &release, &artifacts, available)
+                        .await?,
+                );
+            }
+            if kind == "installer" {
+                latest_by_target = documents.clone();
+            }
+            latest_by_type.insert(kind.to_owned(), documents);
         }
         let mut releases = Vec::new();
         for (release, artifacts) in catalog.releases.iter().take(limit as usize) {
@@ -107,6 +116,7 @@ impl ManifestGeneration {
             schema_version: 2,
             app: app.slug.clone(),
             latest_by_target,
+            latest_by_type,
             releases,
         })
     }

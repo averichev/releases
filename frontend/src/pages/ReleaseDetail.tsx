@@ -9,6 +9,7 @@ import ReleaseForm from './ReleaseForm';
 import ArtifactUploader from './ArtifactUploader';
 import ReleasePublication from './ReleasePublication';
 import ArtifactUpdater from './ArtifactUpdater';
+import DownloadCount from '../components/DownloadCount';
 interface Detail { application: Application; release: Release; artifacts: Artifact[]; options: UploadOptions }
 export default function ReleaseDetail() {
   const { id = '', releaseId = '' } = useParams(); const { state } = useAuth(); const { modal, message } = App.useApp(); const navigate = useNavigate();
@@ -58,19 +59,21 @@ export default function ReleaseDetail() {
     {error && <Alert className="form-alert" type="error" title={error} showIcon />}
     <Card className="release-info" title="Информация о релизе" extra={editable && <Button disabled={busy || uploadBusy} onClick={() => { setError(''); setEditing(true); }}>Изменить релиз</Button>}>
       <Typography.Paragraph className="application-full-description">{release.release_notes || 'Описание изменений не добавлено'}</Typography.Paragraph>
-      <Descriptions column={{ xs: 1, md: 2 }} size="small" items={[{ key: 'created', label: 'Создан', children: date(release.created_at) }, { key: 'updated', label: 'Изменён', children: date(release.updated_at) }, { key: 'files', label: 'Файлы', children: release.artifact_count }, { key: 'size', label: 'Общий размер', children: size(release.total_size_bytes) }, ...(release.status === 'published' ? [{ key: 'published', label: 'Опубликован', children: date(release.published_at!) }] : [])]} />
+      <Descriptions column={{ xs: 1, md: 2 }} size="small" items={[{ key: 'created', label: 'Создан', children: date(release.created_at) }, { key: 'updated', label: 'Изменён', children: date(release.updated_at) }, { key: 'files', label: 'Файлы', children: release.artifact_count }, { key: 'size', label: 'Общий размер', children: size(release.total_size_bytes) }, { key: 'downloads', label: 'Скачивания', children: <DownloadCount count={release.download_count} /> }, ...(release.status === 'published' ? [{ key: 'published', label: 'Опубликован', children: date(release.published_at!) }] : [])]} />
     </Card>
     {editable && <ReleasePublication app={id} release={release} disabled={busy || uploadBusy} onChange={refresh} />}
     <Card className="release-artifacts" title="Артефакты" extra={<Space wrap><Button loading={refreshBusy} onClick={() => { setError(''); void refresh(); }}>Обновить список</Button>{administrator && <Button type="primary" disabled={busy} onClick={() => setUploading(true)}>Добавить артефакт</Button>}</Space>}>
-      <Table<Artifact> rowKey="id" dataSource={artifacts} pagination={false} scroll={{ x: 1100 }} locale={{ emptyText: <Empty description="Файлов пока нет" /> }} columns={[
-        { title: 'Имя файла', dataIndex: 'filename', render: (value: string) => <span className="artifact-filename">{value}</span> }, { title: 'Платформа', dataIndex: 'target', render: targetName }, { title: 'Формат', dataIndex: 'file_type', render: (value: string) => value.toUpperCase() },
-        { title: 'Назначение / подпись', render: (_, artifact) => <ArtifactUpdater app={id} release={releaseId} artifact={artifact} editable={editable} disabled={busy || uploadBusy} onChange={refresh} onError={setError} /> },
-        { title: 'Размер', dataIndex: 'size_bytes', render: size }, { title: 'SHA-256', dataIndex: 'sha256', render: (value: string) => <Typography.Text className="artifact-hash" code copyable={{ text: value, tooltips: ['Скопировать SHA-256', 'Скопировано'] }}>{value}</Typography.Text> },
+      <Table<Artifact> rowKey="id" dataSource={artifacts} pagination={false} scroll={{ x: 1300 }} locale={{ emptyText: <Empty description="Файлов пока нет" /> }} columns={[
+        { title: 'Имя файла', dataIndex: 'filename', width: 160, render: (value: string) => <span className="artifact-filename">{value}</span> }, { title: 'Платформа', dataIndex: 'target', render: targetName }, { title: 'Формат', dataIndex: 'file_type', render: (value: string) => value.toUpperCase() },
+        { title: 'Тип артефакта / подпись', render: (_, artifact) => <ArtifactUpdater app={id} release={releaseId} artifact={artifact} editable={editable} disabled={busy || uploadBusy} onChange={refresh} onError={setError} /> },
+        { title: 'Размер', dataIndex: 'size_bytes', render: size },
+        { title: 'Скачивания', dataIndex: 'download_count', width: 110, align: 'right', render: (count: number) => <DownloadCount count={count} /> },
+        { title: 'SHA-256', dataIndex: 'sha256', width: 180, render: (value: string) => <Typography.Text className="artifact-hash" code copyable={{ text: value, tooltips: ['Скопировать SHA-256', 'Скопировано'] }}>{value}</Typography.Text> },
         { title: 'Загружен', dataIndex: 'created_at', render: date }, { title: 'Действия', render: (_, artifact) => <Space orientation="vertical"><a href={`/api/v1${artifactsPath(id, releaseId)}/${artifact.id}/download`}>Скачать</a>{administrator && <><Button type="link" size="small" disabled={busy || uploadBusy} onClick={() => { void verify(artifact); }}>Проверить SHA-256</Button>{editable && <Button type="link" size="small" danger disabled={busy || uploadBusy} onClick={() => remove(artifact)}>Удалить</Button>}</>}</Space> },
       ]} />
     </Card>
     {release.status === 'published' && <PublishedDistribution app={id} release={releaseId} revision={release.revision} />}
-    {editable && <Card className="release-delete" title="Удаление черновика"><Typography.Paragraph type="secondary">Удаляется релиз вместе с установщиками.</Typography.Paragraph><Button danger disabled={busy || uploadBusy} onClick={() => remove()}>Удалить черновик</Button></Card>}
+    {editable && <Card className="release-delete" title="Удаление черновика"><Typography.Paragraph type="secondary">Удаляется релиз вместе со всеми его файлами.</Typography.Paragraph><Button danger disabled={busy || uploadBusy} onClick={() => remove()}>Удалить черновик</Button></Card>}
     <Modal title="Редактирование релиза" open={editing} footer={null} destroyOnHidden closable={!busy} keyboard={!busy} mask={{ closable: !busy }} onCancel={() => { if (!busy) setEditing(false); }}>{error && <Alert className="form-alert" type="error" title={error} showIcon />}<ReleaseForm release={release} busy={busy} onSubmit={(values) => { void update(values); }} /></Modal>
     <Modal title="Загрузка дистрибутива" open={uploading} footer={null} destroyOnHidden closable={!uploadBusy} keyboard={!uploadBusy} mask={{ closable: !uploadBusy }} onCancel={() => { if (!uploadBusy) setUploading(false); }}><ArtifactUploader applicationId={id} releaseId={releaseId} artifacts={artifacts} options={options} published={release.status === 'published'} onChange={() => { void refresh(); }} onBusy={setUploadBusy} /></Modal>
   </>;

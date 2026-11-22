@@ -7,7 +7,7 @@ import { suggestSlug, validSlug } from '../api/applications';
 import { IconPicker } from './ApplicationForm';
 const user = { id: 'owner-id', username: 'owner', role: 'admin', status: 'active', created_at: 1, updated_at: 1, last_login_at: 1 };
 const session = { user, csrf_token: 'csrf-value' };
-const app = { id: 'b8daf7db-a749-4165-a559-860ddbc6f28c', name: 'Просто CRM', slug: 'prosto-crm', description: 'Система для команды', icon_url: null, visibility: 'private', status: 'active', created_at: 1, updated_at: 1 };
+const app = { download_count: 0, id: 'b8daf7db-a749-4165-a559-860ddbc6f28c', name: 'Просто CRM', slug: 'prosto-crm', description: 'Система для команды', icon_url: null, visibility: 'private', status: 'active', created_at: 1, updated_at: 1 };
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 function renderAt(path: string) { return render(<App><MemoryRouter initialEntries={[path]}><AppRoutes /></MemoryRouter></App>); }
 it('suggests transliterated slugs and applies reserved and length rules', () => {
@@ -122,4 +122,10 @@ it.each(['', 'application/octet-stream'])('accepts an SVG file when browser MIME
   const file = new File(['<svg xmlns="http://www.w3.org/2000/svg"/>'], 'icon.SVG', { type });
   fireEvent.change(screen.getByLabelText('Файл иконки'), { target: { files: [file] } });
   expect(onChange).toHaveBeenCalledWith(file);
+});
+
+it('shows the application download total returned by the API on its overview', async () => {
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : { ...app, download_count: 1234 }))));
+  renderAt(`/admin/applications/${app.id}`);
+  expect(await screen.findByText(/1\s234/)).toBeDefined();
 });

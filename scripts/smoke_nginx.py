@@ -126,10 +126,14 @@ def main():
             assert request(url, headers={"Range": "bytes=0-2", "If-Range": '"old"'})[2] == payload
             assert request(url, headers={"Range": "bytes=0-2,4-5"})[0] == 200
             assert request(url, headers={"If-None-Match": etag})[0] == 304
+            assert api(app_path)["download_count"] == 6
+            assert api(release_path)["download_count"] == 6
+            assert api(release_path + "/artifacts")[0]["download_count"] == 6
             assert request(base + "/_veruna_files/00000000000000000000000000000000.blob")[0] == 404
             assert request(base + "/_veruna_files/../db.sqlite")[0] == 404
             api(app_path, "PATCH", {"visibility": "private"})
             assert request(url, headers={"If-None-Match": etag})[0] == 404
+            assert api(app_path)["download_count"] == 6
             print("Nginx smoke passed: real X-Accel file delivery, GET/HEAD, ETag/304, Range/206/416/If-Range, multiple ranges, internal location, visibility revocation, production config.")
         finally:
             if started:

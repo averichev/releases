@@ -27,10 +27,25 @@ it('shows current installers of different versions for each platform', async () 
 });
 it('shows a real empty release state', async () => {
   vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(url.includes('/releases?') ? {items: [], total: 0} : {...application, latest_by_target: {}})))));
-  renderPage();expect(await screen.findByText('Установщиков пока нет')).toBeDefined();
+  renderPage();expect(await screen.findByText('Файлов для скачивания пока нет')).toBeDefined();
 });
 it('shows 404 for a hidden application', async () => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({error: {code: 'not_found'}}), {status: 404}))));
   renderPage();expect(await screen.findByText('Приложение не найдено')).toBeDefined();
   expect(screen.queryByText('Описание продукта')).toBeNull();
+});
+
+it('shows standalone binaries and archives without requiring any installer', async () => {
+  const binary = {...artifact, filename: 'mockport', target: 'linux-x86_64', format: 'bin', purpose: 'executable'};
+  const archive = {...binary, id: 'archive', filename: 'mockport.tar.gz', format: 'tar.gz', purpose: 'archive'};
+  const binaryRelease = {...release, artifacts: [binary]};
+  const archiveRelease = {...release, artifacts: [archive]};
+  const data = {...application, latest_by_target: {}, latest_by_type: {installer: {}, executable: {'linux-x86_64': binaryRelease}, archive: {'linux-x86_64': archiveRelease}}};
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(url.includes('/releases?') ? {items: [{...release, artifacts: [binary, archive]}], total: 1} : data)))));
+  renderPage();
+  expect((await screen.findByRole('link', {name: /Скачать BIN/})).getAttribute('href')).toBe(binary.download_url);
+  expect(screen.getByRole('link', {name: /Скачать TAR.GZ/})).toBeDefined();
+  expect(screen.getByText('Linux x64 · Исполняемый файл')).toBeDefined();
+  expect(screen.getByText('Linux x64 · Архив')).toBeDefined();
+  expect(screen.queryByText('Файлов для скачивания пока нет')).toBeNull();
 });

@@ -41,6 +41,7 @@ async fn creates_configured_paths_and_applies_baseline_once() {
         vec![
             "_sqlx_migrations",
             "applications",
+            "artifact_download_counts",
             "artifacts",
             "login_attempts",
             "publication_history",
@@ -286,7 +287,6 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
     let release_id = uuid::Uuid::new_v4().to_string();
     sqlx::query("INSERT INTO releases(id,application_id,version,version_key,title,release_notes,created_at,updated_at) VALUES(?,?,'0.5.0+ci.7','0.5.0','Preserve title','Preserve notes',1,1)")
         .bind(&release_id).bind(&app.id).execute(&pool).await.unwrap();
-    let r = state.releases.get(&app.id, &release_id).await.unwrap();
     let mut packet = [0u8; 74];
     packet[..2].copy_from_slice(b"Ed");
     let sig = STANDARD.encode(format!(
@@ -300,7 +300,7 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
     storage.promote(&mut pending).await.unwrap();
     let a = veruna_releases::domain::artifact::Artifact {
         id: uuid::Uuid::new_v4().to_string(),
-        release_id: r.id.clone(),
+        release_id: release_id.clone(),
         filename: "updater.exe".into(),
         target: "windows-x86_64".into(),
         file_type: "exe".into(),
@@ -311,6 +311,7 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
         distribution_role: "updater".into(),
         updater_signature: Some(sig),
         standalone_signature: None,
+        download_count: 0,
     };
     sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&a.id).bind(&a.release_id).bind(&a.filename).bind(&a.target).bind(&a.file_type)
@@ -319,7 +320,7 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
     pending.preserve_on_commit();
     drop(pending);
     sqlx::query("UPDATE releases SET status='published',published_at=updated_at WHERE id=?")
-        .bind(&r.id)
+        .bind(&release_id)
         .execute(&pool)
         .await
         .unwrap();
@@ -330,23 +331,35 @@ async fn migrations_preserve_published_signed_artifacts_and_publication_facts() 
     .fetch_one(&pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO channel_releases(channel_id,application_id,release_id,added_at) VALUES(?,?,?,1)").bind(&old_channel).bind(&app.id).bind(&r.id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO channel_releases(channel_id,application_id,release_id,added_at) VALUES(?,?,?,1)").bind(&old_channel).bind(&app.id).bind(&release_id).execute(&pool).await.unwrap();
     sqlx::query("UPDATE release_channels SET current_release_id=? WHERE id=?")
-        .bind(&r.id)
+        .bind(&release_id)
         .bind(&old_channel)
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO publication_history(application_id,channel_id,release_id,action,new_release_id,user_id,created_at) VALUES(?,?,?,'release_published',?,?,1)").bind(&app.id).bind(&old_channel).bind(&r.id).bind(&r.id).bind(&actor.user.id).execute(&pool).await.unwrap();
-    let before = state.releases.get(&app.id, &r.id).await.unwrap();
+    sqlx::query("INSERT INTO publication_history(application_id,channel_id,release_id,action,new_release_id,user_id,created_at) VALUES(?,?,?,'release_published',?,?,1)").bind(&app.id).bind(&old_channel).bind(&release_id).bind(&release_id).bind(&actor.user.id).execute(&pool).await.unwrap();
+    let snapshot = "SELECT json_array(id,application_id,version,version_key,title,release_notes,status,revision,created_at,updated_at,published_at) FROM releases WHERE id=?";
+    let before: String = sqlx::query_scalar(snapshot)
+        .bind(&release_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let history: Vec<(i64, String, String, String, i64)> = sqlx::query_as("SELECT id,application_id,release_id,user_id,created_at FROM publication_history WHERE action='release_published'").fetch_all(&pool).await.unwrap();
     drop(state);
     pool.close().await;
     let pool = initialize(&config).await.unwrap();
     let state = application_state(pool.clone(), &config).await.unwrap();
-    assert_eq!(state.releases.get(&app.id, &r.id).await.unwrap(), before);
     assert_eq!(
-        state.artifacts.list(&app.id, &r.id).await.unwrap(),
+        sqlx::query_scalar::<_, String>(snapshot)
+            .bind(&release_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        state.artifacts.list(&app.id, &release_id).await.unwrap(),
         vec![a.clone()]
     );
     assert_eq!(
@@ -533,4 +546,138 @@ async fn migration_requires_explicit_owner_policy_before_expanding_publications(
     );
     assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('release_channels','channel_releases','application_distribution')").fetch_one(&migrated).await.unwrap(), 0);
     migrated.close().await;
+}
+
+#[tokio::test]
+async fn artifact_types_migration_preserves_published_files_signatures_and_guards() {
+    let dir = tempdir().unwrap();
+    let mut config = AppConfig::default();
+    config.database.path = dir.path().join("existing.sqlite");
+    config.storage.directory = dir.path().join("objects");
+    config.storage.icons_directory = dir.path().join("icons");
+    let old = dir.path().join("migrations");
+    std::fs::create_dir(&old).unwrap();
+    for entry in std::fs::read_dir("migrations").unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_str().unwrap() < "0012" {
+            std::fs::copy(entry.path(), old.join(entry.file_name())).unwrap();
+        }
+    }
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&config.database.path)
+            .create_if_missing(true)
+            .foreign_keys(true),
+    )
+    .await
+    .unwrap();
+    sqlx::migrate::Migrator::new(old.as_path())
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+    let app = uuid::Uuid::new_v4().to_string();
+    let release = uuid::Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO applications(id,slug,name,name_search,description,visibility,status,created_at,updated_at,product_id,standalone_public_key) VALUES(?,'existing','Existing','existing','','public','active',1,1,?,?)")
+        .bind(&app).bind(uuid::Uuid::new_v4().to_string()).bind("A".repeat(43)).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO releases(id,application_id,version,version_key,created_at,updated_at) VALUES(?,?,'0.5.0','0.5.0',1,1)")
+        .bind(&release).bind(&app).execute(&pool).await.unwrap();
+    std::fs::create_dir(&config.storage.directory).unwrap();
+    for (target, name, role, updater, standalone) in [
+        ("windows-x86_64", "setup.exe", "installer", None, None),
+        (
+            "windows-x86_64",
+            "update.exe",
+            "updater",
+            Some("preserved-tauri-signature"),
+            None,
+        ),
+        (
+            "windows-aarch64",
+            "signed.exe",
+            "installer",
+            None,
+            Some("preserved-standalone-jws"),
+        ),
+    ] {
+        let key = format!("{}.blob", uuid::Uuid::new_v4().simple());
+        sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature,standalone_signature) VALUES(?,?,?,?,'exe',3,?,?,1,?,?,?)")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&release).bind(name).bind(target)
+            .bind("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad").bind(&key).bind(role).bind(updater).bind(standalone)
+            .execute(&pool).await.unwrap();
+        std::fs::write(config.storage.directory.join(key), b"abc").unwrap();
+    }
+    sqlx::query("UPDATE releases SET status='published',published_at=1 WHERE id=?")
+        .bind(&release)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let snapshot = "SELECT storage_key,json_array(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature,standalone_signature) FROM artifacts WHERE release_id=? ORDER BY id";
+    let before: Vec<(String, String)> = sqlx::query_as(snapshot)
+        .bind(&release)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let guards: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_schema WHERE type IN ('trigger','index') AND sql IS NOT NULL ORDER BY name").fetch_all(&pool).await.unwrap();
+    pool.close().await;
+    let pool = initialize(&config).await.unwrap();
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(snapshot)
+            .bind(&release)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        before
+    );
+    for (key, _) in &before {
+        assert_eq!(
+            std::fs::read(config.storage.directory.join(key)).unwrap(),
+            b"abc"
+        );
+    }
+    let current_guards = sqlx::query_scalar::<_, String>("SELECT name FROM sqlite_schema WHERE type IN ('trigger','index') AND sql IS NOT NULL ORDER BY name").fetch_all(&pool).await.unwrap();
+    assert!(guards.iter().all(|guard| current_guards.contains(guard)));
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        sqlx::query("UPDATE artifacts SET distribution_role='executable'")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("DELETE FROM artifacts")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE applications SET standalone_public_key=NULL")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE applications SET product_id_locked=0")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    pool.close().await;
+    // SQLx checksums and the data remain valid on the next startup too.
+    let pool = initialize(&config).await.unwrap();
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(snapshot)
+            .bind(&release)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        before
+    );
 }

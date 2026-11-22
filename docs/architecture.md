@@ -198,7 +198,9 @@ Nginx — альтернативный delivery adapter в том же бина�
 
 Публичные React-маршруты отделены от AuthProvider и административного layout. /{slug} — отдельный серверный document handler с проверкой публичности; ошибки API/файлов не попадают в SPA fallback. Явные /admin и /admin/* сохраняют вложенные страницы панели, /favicon.svg и /index.html — встроенные assets. В панели добавлены /distribution, ссылки опубликованных файлов, готовность Tauri и диагностика GET манифеста + HEAD по allowlisted маршрутам текущего сервиса. Произвольных сетевых диагностических запросов сервер не выполняет.
 
-Контракт и кеширование: [public-distribution.md](public-distribution.md). Nginx и права: [deploy/nginx](../deploy/nginx/README.md). Tauri: [integrations/tauri.md](integrations/tauri.md). Никакой статистики, CI/CD, S3/CDN или нового frontend/backend процесса этап не добавляет.
+Контракт и кеширование: [public-distribution.md](public-distribution.md). Nginx и права: [deploy/nginx](../deploy/nginx/README.md). Tauri: [integrations/tauri.md](integrations/tauri.md). CI/CD, S3/CDN или нового frontend/backend процесса этап не добавляет.
+
+Последующее расширение: `http/delivery` регистрирует начало публичного GET/Range с нулевого байта через PublicDistribution после всех проверок и до выдачи потока/X-Accel. DistributionRepository атомарно перепроверяет published/public/active и ownership и увеличивает единственный SQLite-счётчик артефакта. Итоги Release/Application вычисляются SQL SUM в конкретных репозиториях. Отдельного сервиса аналитики, очереди или журнала DownloadEvent нет. Счётчики доступны через session-защищённые административные DTO; публичные manifest/ETag не меняются. [Правила метрики](public-distribution.md#счётчики-скачиваний), [схема](data-model.md#artifact_download_counts).
 
 ## Настройка Tauri-интеграции
 
@@ -212,7 +214,7 @@ Nginx — альтернативный delivery adapter в том же бина�
 
 Переменные конфигурации используют имена разделов без префикса: `SERVER__BIND`, `DATABASE__PATH` и т. д.; TOML выбирается через `CONFIG`. Старые `VERUNA__…` и `VERUNA_CONFIG` отклоняются с инструкцией миграции. Из окружения читаются только известные разделы, опечатки внутри них отклоняются; посторонние переменные и их не-UTF-8 значения игнорируются.
 
-Публикация фиксирует статус и факт первой публикации в одной транзакции. PublicDistribution получает согласованный каталог опубликованных релизов, сортирует SemVer и выбирает installer отдельно для target/формата. Tauri использует тот же каталог и выбирает совместимый подписанный updater. Переход старой схемы описан в [миграции 0009](migration-0009.md).
+Публикация фиксирует статус и факт первой публикации в одной транзакции. PublicDistribution получает согласованный каталог опубликованных релизов, сортирует SemVer и выбирает артефакт отдельно для target/типа/формата (без типа — прежний installer). Классификация использует существующий distribution_role: executable/installer/updater/archive; target по-прежнему объединяет ОС и архитектуру. Latest и latest_by_type не подменяют разные типы. Tauri использует тот же каталог и выбирает совместимый подписанный updater. Переход старой схемы описан в [миграции 0009](migration-0009.md).
 
 ## Независимая идентичность standalone-продукта
 

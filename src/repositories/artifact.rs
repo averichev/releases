@@ -3,6 +3,7 @@ use crate::{
     services::error::{Result, ServiceError},
 };
 use sqlx::{SqliteConnection, SqlitePool};
+const SELECT: &str = "SELECT a.*, coalesce(d.download_count,0) AS download_count FROM artifacts a LEFT JOIN artifact_download_counts d ON d.artifact_id=a.id";
 #[derive(sqlx::FromRow)]
 struct StoredArtifact {
     id: String,
@@ -17,6 +18,7 @@ struct StoredArtifact {
     distribution_role: String,
     updater_signature: Option<String>,
     standalone_signature: Option<String>,
+    download_count: i64,
 }
 impl From<StoredArtifact> for Artifact {
     fn from(v: StoredArtifact) -> Self {
@@ -33,6 +35,7 @@ impl From<StoredArtifact> for Artifact {
             distribution_role: v.distribution_role,
             updater_signature: v.updater_signature,
             standalone_signature: v.standalone_signature,
+            download_count: v.download_count,
         }
     }
 }
@@ -52,9 +55,9 @@ impl ArtifactsRepository {
         )
     }
     pub async fn list(&self, release: &str) -> Result<Vec<Artifact>> {
-        Ok(sqlx::query_as::<_, StoredArtifact>(
-            "SELECT * FROM artifacts WHERE release_id=? ORDER BY created_at,id",
-        )
+        Ok(sqlx::query_as::<_, StoredArtifact>(&format!(
+            "{SELECT} WHERE a.release_id=? ORDER BY a.created_at,a.id"
+        ))
         .bind(release)
         .fetch_all(&self.pool)
         .await?
@@ -63,9 +66,9 @@ impl ArtifactsRepository {
         .collect())
     }
     pub async fn list_in(c: &mut SqliteConnection, release: &str) -> Result<Vec<Artifact>> {
-        Ok(sqlx::query_as::<_, StoredArtifact>(
-            "SELECT * FROM artifacts WHERE release_id=? ORDER BY created_at,id",
-        )
+        Ok(sqlx::query_as::<_, StoredArtifact>(&format!(
+            "{SELECT} WHERE a.release_id=? ORDER BY a.created_at,a.id"
+        ))
         .bind(release)
         .fetch_all(c)
         .await?
@@ -74,7 +77,7 @@ impl ArtifactsRepository {
         .collect())
     }
     pub async fn get(&self, app: &str, release: &str, id: &str) -> Result<Artifact> {
-        Ok(sqlx::query_as::<_,StoredArtifact>("SELECT a.* FROM artifacts a JOIN releases r ON r.id=a.release_id WHERE r.application_id=? AND a.release_id=? AND a.id=?")
+        Ok(sqlx::query_as::<_,StoredArtifact>(&format!("{SELECT} JOIN releases r ON r.id=a.release_id WHERE r.application_id=? AND a.release_id=? AND a.id=?"))
             .bind(app).bind(release).bind(id).fetch_optional(&self.pool).await?.ok_or(ServiceError::NotFound)?.into())
     }
     pub async fn check_conflict(

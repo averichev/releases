@@ -379,20 +379,18 @@ async fn identity_migration_preserves_legacy_published_and_draft_jws_byte_for_by
             .fetch_all(&pool)
             .await
             .unwrap();
-    // Existing repository models do not require the new columns on releases/artifacts.
-    let mut original = Vec::new();
-    for (app, release, artifact, _, _, _) in &legacy {
-        original.push((
-            ReleasesRepository::new(pool.clone())
-                .get(app, release)
-                .await
-                .unwrap(),
-            ArtifactsRepository::new(pool.clone())
-                .get(app, release, artifact)
-                .await
-                .unwrap(),
-        ));
-    }
+    // Snapshot the historical schema directly; current repositories also read
+    // counters introduced after this fixture's migration version.
+    let release_snapshot = "SELECT json_object('id',id,'application_id',application_id,'version',version,'version_key',version_key,'title',title,'release_notes',release_notes,'status',status,'revision',revision,'created_at',created_at,'updated_at',updated_at,'published_at',published_at) FROM releases ORDER BY id";
+    let artifact_snapshot = "SELECT json_object('id',id,'release_id',release_id,'filename',filename,'target',target,'file_type',file_type,'size_bytes',size_bytes,'sha256',sha256,'storage_key',storage_key,'created_at',created_at,'distribution_role',distribution_role,'updater_signature',updater_signature,'standalone_signature',standalone_signature) FROM artifacts ORDER BY id";
+    let releases_before: Vec<String> = sqlx::query_scalar(release_snapshot)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let artifacts_before: Vec<String> = sqlx::query_scalar(artifact_snapshot)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
     pool.close().await;
     let pool = initialize(&config).await.unwrap();
     assert_eq!(
@@ -404,9 +402,21 @@ async fn identity_migration_preserves_legacy_published_and_draft_jws_byte_for_by
         .unwrap(),
         apps_before
     );
-    for ((app, release, artifact, storage_key, key, signature), (old_release, old_artifact)) in
-        legacy.iter().zip(&original)
-    {
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(release_snapshot)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        releases_before
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(artifact_snapshot)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        artifacts_before
+    );
+    for (app, release, artifact, storage_key, key, signature) in &legacy {
         let p = ApplicationsRepository::new(pool.clone())
             .get(app)
             .await
@@ -419,8 +429,8 @@ async fn identity_migration_preserves_legacy_published_and_draft_jws_byte_for_by
             .get(app, release, artifact)
             .await
             .unwrap();
-        assert_eq!(&r, old_release);
-        assert_eq!(&a, old_artifact);
+        assert_eq!(r.download_count, 0);
+        assert_eq!(a.download_count, 0);
         assert_eq!(
             p.product_id.as_deref(),
             signature.as_ref().map(|_| app.as_str())

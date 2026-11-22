@@ -4,11 +4,11 @@
 
 1. Войдите администратором, откройте **Приложения → нужное приложение → Релизы**.
 2. Нажмите **Создать релиз**, введите `1.2.0`, необязательное название и описание. После сохранения откроется `/admin/applications/:applicationId/releases/:releaseId`.
-3. Нажмите **Добавить артефакт**, выберите назначение (по умолчанию установщик), платформу и файл. Для Tauri Updater можно сразу приложить `.sig`. Следующие файлы добавляются последовательно; например, EXE для Windows x64 и TAR.GZ для Linux x64.
+3. Нажмите **Добавить артефакт**, явно выберите **Тип артефакта**, платформу и файл. Для Tauri Updater можно сразу приложить `.sig`. Следующие файлы добавляются последовательно; например, EXE для Windows x64 и TAR.GZ для Linux x64.
 4. Дождитесь ответа сервера после передачи 100%. Таблица покажет фактические размер и SHA-256. Проверьте скачивание, копирование хеша и **Проверить SHA-256**.
 5. Проверьте готовность и опубликуйте. При необходимости добавьте новые артефакты той же версии через ту же кнопку; updater в published требует `.sig` в этой форме. Существующие опубликованные файлы нельзя менять/удалять. У черновика удаление и изменение роли/подписи остаются доступны. Обновите вложенную страницу: она должна открыться снова.
 
-Operator видит релизы и скачивает файлы, но не меняет данные. Новый релиз нельзя создать для архивного приложения; уже существующими черновиками можно управлять. Публикация, манифесты и подписи добавлены на этапе 5: см. [release-management.md](release-management.md). Публичные скачивания реализованы: [публичное распространение](public-distribution.md). API-токены отсутствуют.
+Operator видит релизы и скачивает файлы, но не меняет данные. Новый релиз нельзя создать для архивного приложения; уже существующими черновиками можно управлять. Публикация, манифесты и подписи добавлены на этапе 5: см. [release-management.md](release-management.md). Публичные скачивания реализованы: [публичное распространение](public-distribution.md). API-токены отсутствуют. В форме черновика доступны все четыре типа; у опубликованного файла тип неизменяем.
 
 ## Данные и инварианты
 
@@ -18,7 +18,9 @@ Operator видит релизы и скачивает файлы, но не м�
 
 Версию проверяет `semver`: trim и один lowercase `v` в начале нормализуются. `version` сохраняет build metadata, но UNIQUE(application_id, version_key) использует SemVer без `+build`. Поэтому `1.2.0`, `v1.2.0` и `1.2.0+build.15` конфликтуют внутри одного приложения. В разных приложениях одинаковые версии допустимы. Это сознательно исключает два релиза с одинаковым приоритетом перед добавлением выбора актуального релиза. Сортировка использует [Version::cmp_precedence](https://docs.rs/semver/1.0.28/semver/struct.Version.html#method.cmp_precedence), а не текстовое сравнение или Ord, учитывающий build metadata. Поиск и сортировка загружают только метаданные релизов одного приложения, затем выполняют пагинацию; это O(N) по числу его релизов и подходит текущему масштабу.
 
-Нормализованные платформы определены в `domain/artifact.rs::TARGETS`; UI получает список из API. Для общего пакета macOS под Intel и Apple Silicon используйте `darwin-universal` (macOS Universal). Формат определяется сервером по расширению в lowercase, включая tar.gz/tar.xz/tar.bz2/tar.zst. Остальные расширения тоже поддерживаются как проверенный токен длиной 1–32 ASCII-символа (`a-z`, цифры, `.`, `_`, `-`). Для файла без расширения нужен явный file_type. Если есть и расширение, и явный формат, они должны совпасть. MIME клиента не считается источником формата. Это метаданные, а не проверка содержимого или безопасности исполняемого файла. Уникальна комбинация `(release_id,target,file_type,distribution_role)`; для updater дополнительно уникальны `(release_id,target)` независимо от формата.
+Нормализованные платформы определены в `domain/artifact.rs::TARGETS`; UI получает список из API. Для общего пакета macOS под Intel и Apple Silicon используйте `darwin-universal` (macOS Universal). Формат определяется сервером по расширению в lowercase, включая tar.gz/tar.xz/tar.bz2/tar.zst. Остальные расширения тоже поддерживаются как проверенный токен длиной 1–32 ASCII-символа (`a-z`, цифры, `.`, `_`, `-`). Файл без расширения получает file_type=bin; явный формат необязателен. Имя и содержимое сохраняются, SHA-256 вычисляется по исходным байтам. Если есть и расширение, и явный формат, они должны совпасть. MIME клиента не считается источником формата. Это метаданные, а не проверка содержимого или безопасности исполняемого файла. Уникальна комбинация `(release_id,target,file_type,distribution_role)`; для updater дополнительно уникальны `(release_id,target)` независимо от формата.
+
+Тип хранится в прежнем `distribution_role`, без второй классификации: `executable` — самостоятельные EXE/ELF/Mach-O; `installer` — установка приложения; прежний `updater` — Tauri Updater; `archive` — архив приложения. Один EXE может быть executable или installer — тип выбирает издатель. ОС/архитектура хранятся в существующем target, формат — в file_type, версия — в родительском Release. Для обычного executable не нужны ни установщик, ни ключи, подпись, product_id или пользовательский манифест. Сервер не собирает и не устанавливает приложение.
 
 ## Административный API
 
@@ -38,15 +40,17 @@ Operator видит релизы и скачивает файлы, но не м�
 | GET `/{releaseId}/artifacts/{artifactId}/download` | поток, attachment, application/octet-stream |
 | DELETE `/{releaseId}/artifacts/{artifactId}` | 204 |
 | POST `/{releaseId}/artifacts/{artifactId}/verify` | `{valid: true или false}` |
-| GET `/artifact-options` (относительно admin) | `{targets,file_types,max_file_bytes,upload_idle_seconds}` |
+| GET `/artifact-options` (относительно admin) | `{targets,file_types,artifact_types,max_file_bytes,upload_idle_seconds}` |
 
 Список: page ≥ 1, per_page 1–100 (по умолчанию 20), search до 200 символов — буквальная регистрозависимая подстрока версии, sort = version/created_at/updated_at, order = asc/desc. Необязательный status=draft|published фильтрует состояние. По умолчанию SemVer по убыванию. Параметры поиска/пагинации панели сохраняются в URL.
 
 POST JSON: `{"version":"1.2.0","title":"Название","release_notes":"Изменения"}`. Обязательна только version. Название до 120 символов; пустое/null означает отсутствие названия. Описание до 20 000 символов, по умолчанию пустое. PATCH принимает непустое подмножество этих полей; title=null очищает название, null для version/release_notes запрещён. Неизвестные поля отвергаются. JSON ограничен 128 KiB.
 
-Release DTO: id, application_id, version, title, release_notes, status, revision, created_at, updated_at, published_at, artifact_count, total_size_bytes. Artifact DTO: id, release_id, filename, target, file_type, size_bytes, sha256, created_at, distribution_role, signature_present. Даты — Unix seconds UTC. Storage key и физические пути не раскрываются.
+Release DTO: id, application_id, version, title, release_notes, status, revision, created_at, updated_at, published_at, artifact_count, total_size_bytes. GET `/artifact-options` дополнительно возвращает `artifact_types` со списком допустимых кодов. Существующий PUT `.../artifacts/{artifact}/updater` принимает `distribution_role` любого из четырёх типов для черновиков, сохраняя прежние middleware и проверки конфликтов.
 
-Multipart содержит **target**, необязательные **file_type** и **distribution_role** (`installer` по умолчанию, `updater`) до ровно одного **file** с filename. Дополнительный файловый part **signature** с именем `.sig` (до 16384 байт) разрешён до или после file. Для published updater он обязателен в этом же запросе; подпись installer запрещена. Неизвестные/повторные поля и метаданные после file запрещены. Пример с уже полученными cookie и CSRF:
+Artifact DTO: id, release_id, filename, target, file_type, size_bytes, sha256, created_at, distribution_role, signature_present. Даты — Unix seconds UTC. Storage key и физические пути не раскрываются.
+
+Multipart содержит **target**, необязательные **file_type** и **distribution_role** (`executable|installer|updater|archive`; для совместимости API по умолчанию installer, в UI требуется явный выбор) до ровно одного **file** с filename. Дополнительный файловый part **signature** с именем `.sig` (до 16384 байт) разрешён до или после file. Для published updater он обязателен в этом же запросе; Tauri-подпись для executable/installer/archive запрещена и не требуется. Существующий необязательный standalone_signature относится к отдельному протоколу подписанных обновлений, а не к классификации executable. Неизвестные/повторные поля и метаданные после file запрещены. Пример с уже полученными cookie и CSRF:
 
 ```sh
 curl --fail-with-body -b cookies.txt \
@@ -55,6 +59,8 @@ curl --fail-with-body -b cookies.txt \
   -F 'target=windows-x86_64' -F 'distribution_role=installer' -F 'file=@installer.exe' \
   "https://apps.veruna.systems/api/v1/admin/applications/$APPLICATION_ID/releases/$RELEASE_ID/artifacts"
 ```
+
+Для Linux ELF без расширения передайте `-F 'target=linux-x86_64' -F 'distribution_role=executable' -F 'file=@mockport'` без file_type и signature. Для Windows EXE используйте `target=windows-x86_64` и `distribution_role=executable`, для архива TAR.GZ — `distribution_role=archive`. Эти файлы и установщик с тем же target/форматом могут сосуществовать в одной версии. Второй файл того же target/типа/формата возвращает 409, даже при другом имени.
 
 Для подписанного updater используйте в том же запросе `-F 'distribution_role=updater' -F 'file=@updater.exe' -F 'signature=@updater.exe.sig'` после target. Криптографическую проверку выполняет клиент; сервер проверяет структуру существующим валидатором.
 
