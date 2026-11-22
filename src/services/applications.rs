@@ -6,7 +6,10 @@ use crate::{
         },
         user::Role,
     },
-    infrastructure::{icons::IconStorage, secrets},
+    infrastructure::{
+        icons::{IconStorage, StoredIcon},
+        secrets,
+    },
     repositories::{applications::ApplicationsRepository, sessions::SessionsRepository},
     services::{
         error::{Result, ServiceError},
@@ -203,7 +206,7 @@ impl ApplicationCatalog {
         tx.commit().await?;
         Ok(())
     }
-    pub async fn icon(&self, id: &str) -> Result<Vec<u8>> {
+    pub async fn icon(&self, id: &str) -> Result<StoredIcon> {
         let app = self.get(id).await?;
         let key = app.icon_key.ok_or(ServiceError::NotFound)?;
         self.icons.read(&key).await

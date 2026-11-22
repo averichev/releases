@@ -17,16 +17,17 @@ export function IconPicker({ file, onChange, disabled }: { file: File | null; on
     <Space wrap>{preview && <Avatar shape="square" size={56} src={preview} />}
       <label className={`icon-file-label${disabled ? ' disabled' : ''}`}>
         <UploadOutlined /> {file ? 'Выбрать другую иконку' : 'Выбрать иконку'}
-        <input type="file" aria-label="Файл иконки" accept="image/png,image/jpeg,image/webp" disabled={disabled} onChange={(e) => {
+        <input type="file" aria-label="Файл иконки" accept="image/svg+xml,.svg,image/png,image/jpeg,image/webp" disabled={disabled} onChange={(e) => {
           const selected = e.target.files?.[0]; e.target.value = '';
           if (!selected) return;
-          if (selected.size > 2 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(selected.type)) { setError('Выберите PNG, JPEG или WebP до 2 МиБ.'); return; }
+          const supported = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp'].includes(selected.type) || /\.svg$/i.test(selected.name);
+          if (selected.size > 2 * 1024 * 1024 || !supported) { setError('Выберите SVG, PNG, JPEG или WebP до 2 МиБ.'); return; }
           setError(''); onChange(selected);
         }} />
       </label>
       {file && <Button disabled={disabled} onClick={() => { setError(''); onChange(null); }}>Отменить выбор</Button>}
     </Space>
-    <Typography.Paragraph type="secondary" className="icon-help">PNG, JPEG или WebP · до 2 МиБ · до 1024×1024 пикселей</Typography.Paragraph>
+    <Typography.Paragraph type="secondary" className="icon-help">SVG, PNG, JPEG или WebP · до 2 МиБ · растровые до 1024×1024 пикселей</Typography.Paragraph>
     {error && <Alert type="error" title={error} showIcon />}
   </div>;
 }

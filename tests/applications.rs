@@ -556,7 +556,17 @@ async fn icon_content_limits_replacement_access_and_startup_recovery() {
     assert_ne!(urls[1], urls[2]);
     let last = app.call("GET", &path(&created), json!(null), 200).await;
     for bytes in [
-        b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+        b"<svg xmlns='http://www.w3.org/2000/svg'>".to_vec(),
+        b"<svg/>".to_vec(),
+        b"<html xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+        b"<!DOCTYPE svg [<!ENTITY x 'unsafe'>]><svg xmlns='http://www.w3.org/2000/svg'>&x;</svg>"
+            .to_vec(),
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg'>{}{}</svg>",
+            "<g>".repeat(64),
+            "</g>".repeat(64)
+        )
+        .into_bytes(),
         b"GIF89a".to_vec(),
         b"\x89PNG\r\n\x1a\n".to_vec(),
         Vec::new(),
@@ -614,6 +624,7 @@ async fn icon_content_limits_replacement_access_and_startup_recovery() {
                 .icon(created["id"].as_str().unwrap())
                 .await
                 .unwrap()
+                .bytes
         )
         .unwrap()
         .to_rgba8(),
@@ -627,6 +638,132 @@ async fn icon_content_limits_replacement_access_and_startup_recovery() {
             .unwrap()
             .starts_with(&icon_path)
     );
+}
+
+#[tokio::test]
+async fn svg_icons_are_sanitized_served_publicly_and_retained_after_restart() {
+    let app = TestApp::new().await;
+    let created = app.create("svg-icon", "SVG icon").await;
+    let icon_path = format!("{}/icon", path(&created));
+    let svg = br##"<?xml version="1.0"?>
+        <?xml-stylesheet href="https://untrusted.example/style.css"?>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048" onload="alert(1)">
+          <defs><linearGradient id="color"><stop stop-color="#123456"/></linearGradient></defs>
+          <style>path { fill: url(#color); }</style>
+          <path d="M0 0H2048V2048Z"/>
+          <script>alert(document.cookie)</script>
+          <foreignObject><div xmlns="http://www.w3.org/1999/xhtml">HTML</div></foreignObject>
+          <image href="data:text/html,unsafe"/>
+        </svg>"##;
+    // Intentionally mismatched request MIME: the server inspects the content.
+    let response = app
+        .request("POST", &icon_path, svg.to_vec(), Some(&app.token), true)
+        .await;
+    assert_eq!(response.status(), 200);
+    let updated = body(response).await;
+    let url = updated["icon_url"].as_str().unwrap();
+    let response = app
+        .request("GET", url, Vec::new(), Some(&app.token), false)
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["content-type"], "image/svg+xml");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let csp = response.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(csp.contains("sandbox; default-src 'none'"));
+    assert!(!csp.contains("script-src 'self'"));
+    let sanitized = bytes(response).await;
+    let text = std::str::from_utf8(&sanitized).unwrap();
+    for forbidden in [
+        "onload",
+        "script",
+        "foreignObject",
+        "data:text/html",
+        "untrusted.example",
+        "document.cookie",
+    ] {
+        assert!(!text.contains(forbidden), "{text}");
+    }
+    for retained in [
+        "viewBox=\"0 0 2048 2048\"",
+        "linearGradient",
+        "url(#color)",
+        "<path",
+    ] {
+        assert!(text.contains(retained), "{text}");
+    }
+    assert_eq!(
+        app.request("GET", url, Vec::new(), None, false)
+            .await
+            .status(),
+        401
+    );
+    let public_url = "/api/v1/public/applications/svg-icon/icon";
+    assert_eq!(
+        app.request("GET", public_url, Vec::new(), None, false)
+            .await
+            .status(),
+        404
+    );
+    app.call(
+        "PATCH",
+        &path(&created),
+        json!({"visibility":"public"}),
+        200,
+    )
+    .await;
+    for method in ["GET", "HEAD"] {
+        let response = app
+            .request(method, public_url, Vec::new(), None, false)
+            .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["content-type"], "image/svg+xml");
+        assert_eq!(response.headers()["content-security-policy"], csp);
+        assert_eq!(
+            bytes(response).await,
+            if method == "HEAD" {
+                Vec::new()
+            } else {
+                sanitized.clone()
+            }
+        );
+    }
+    app.call(
+        "POST",
+        &format!("{}/archive", path(&created)),
+        json!({}),
+        200,
+    )
+    .await;
+    assert_eq!(
+        app.request("HEAD", public_url, Vec::new(), None, false)
+            .await
+            .status(),
+        404
+    );
+    app.call(
+        "POST",
+        &format!("{}/restore", path(&created)),
+        json!({}),
+        200,
+    )
+    .await;
+    app.state.database.close().await;
+    let pool = initialize(&app.config).await.unwrap();
+    let state = application_state(pool, &app.config).await.unwrap();
+    let stored = state
+        .applications
+        .icon(created["id"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(stored.bytes, sanitized);
+    assert!(matches!(
+        stored.format,
+        veruna_releases::infrastructure::icons::IconFormat::Svg
+    ));
 }
 #[cfg(unix)]
 #[tokio::test]

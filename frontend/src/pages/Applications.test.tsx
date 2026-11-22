@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
 import { AppRoutes } from '../App';
 import { suggestSlug, validSlug } from '../api/applications';
+import { IconPicker } from './ApplicationForm';
 const user = { id: 'owner-id', username: 'owner', role: 'admin', status: 'active', created_at: 1, updated_at: 1, last_login_at: 1 };
 const session = { user, csrf_token: 'csrf-value' };
 const app = { id: 'b8daf7db-a749-4165-a559-860ddbc6f28c', name: 'Просто CRM', slug: 'prosto-crm', description: 'Система для команды', icon_url: null, visibility: 'private', status: 'active', created_at: 1, updated_at: 1 };
@@ -96,3 +97,29 @@ it('preserves a created application when its icon upload fails', async () => {
   expect(screen.getByRole('button', { name: 'Сохранить изменения' })).toBeDefined();
   expect(fetch.mock.calls.filter(([url, init]) => url.endsWith('/applications') && init?.method === 'POST')).toHaveLength(1);
 }, 10000);
+
+it('uploads an SVG from application settings', async () => {
+  vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:svg-preview'; } static revokeObjectURL() {} });
+  const iconUrl = `/api/v1/admin/applications/${app.id}/icon?v=svg`;
+  const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : url.endsWith('/icon') ? { ...app, icon_url: iconUrl } : app)));
+  vi.stubGlobal('fetch', fetch); renderAt(`/admin/applications/${app.id}/settings`);
+  const picker = await screen.findByLabelText('Файл иконки');
+  expect(picker.getAttribute('accept')).toContain('image/svg+xml');
+  const file = new File(['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0H24V24Z"/></svg>'], 'icon.SVG', { type: 'image/svg+xml' });
+  fireEvent.change(picker, { target: { files: [file] } });
+  expect(screen.getByText('Выбрать другую иконку')).toBeDefined();
+  fireEvent.click(screen.getByRole('button', { name: 'Загрузить иконку' }));
+  await waitFor(() => expect(fetch.mock.calls.some(([url]) => url.endsWith('/icon'))).toBe(true));
+  const upload = (fetch.mock.calls as unknown as [string, RequestInit][]).find(([url]) => url.endsWith('/icon'));
+  expect(upload?.[1].body).toBe(file);
+  expect(upload?.[1].headers).toMatchObject({ 'X-CSRF-Token': 'csrf-value' });
+  await waitFor(() => expect(document.querySelector(`img[src="${iconUrl}"]`)).not.toBeNull());
+});
+
+it.each(['', 'application/octet-stream'])('accepts an SVG file when browser MIME is %s', (type) => {
+  const onChange = vi.fn();
+  render(<IconPicker file={null} onChange={onChange} disabled={false} />);
+  const file = new File(['<svg xmlns="http://www.w3.org/2000/svg"/>'], 'icon.SVG', { type });
+  fireEvent.change(screen.getByLabelText('Файл иконки'), { target: { files: [file] } });
+  expect(onChange).toHaveBeenCalledWith(file);
+});

@@ -126,6 +126,14 @@ def main():
             icon, icon_headers = call(application["icon_url"])
             assert icon.startswith(b"\x89PNG") and icon_headers["Content-Type"] == "image/png"
             assert icon_headers["Cache-Control"] == "no-store"
+            svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" onload="alert(1)"><path d="M0 0H24V24Z"/><script>alert(1)</script></svg>'
+            application, _ = call(application_path + "/icon", "POST", svg, csrf)
+            icon, icon_headers = call(application["icon_url"])
+            assert icon_headers["Content-Type"] == "image/svg+xml"
+            assert b"<path" in icon and b"onload" not in icon and b"script" not in icon
+            assert "sandbox; default-src 'none'" in icon_headers["Content-Security-Policy"]
+            public_icon, public_headers = call("/api/v1/public/applications/catalog-smoke/icon", opener=build_opener())
+            assert public_icon == icon and public_headers["Content-Type"] == "image/svg+xml"
             call(application_path + "/icon", "POST", b"<svg/>", csrf, 400)
             call(application_path + "/archive", "POST", csrf=csrf)
             active, _ = call("/api/v1/admin/applications")
@@ -276,13 +284,15 @@ def main():
                 assert database.execute("SELECT count(*) FROM user_tokens").fetchone()[0] == 0
                 assert database.execute("SELECT slug FROM applications").fetchone()[0] == "catalog-smoke"
                 assert database.execute("SELECT tauri_public_key FROM applications").fetchone()[0] == public_key
+                icon_key = database.execute("SELECT icon_key FROM applications").fetchone()[0]
+                assert icon_key.endswith(".svg") and (root / "storage/icons" / icon_key).read_bytes() == icon
             assert len(list((root / "storage/icons").glob("*.png"))) == 1
             process.send_signal(signal.SIGTERM)
             assert process.wait(timeout=20) == 0, log_path.read_text()
             logs = log_path.read_text()
             assert "Veruna Releases stopped" in logs
             assert all(value not in logs for value in secret_values), "Secret leaked into logs"
-            print("Smoke passed: standalone assets, CLI recovery, sessions/CSRF, catalog, uploads/SHA-256, publication/history, platform latest, manifest v2, downloads/HEAD/Range, Tauri, immutability, nested routes, safe logs, WAL, migrations, SIGTERM.")
+            print("Smoke passed: standalone assets, CLI recovery, sessions/CSRF, catalog, sanitized SVG icons, uploads/SHA-256, publication/history, platform latest, manifest v2, downloads/HEAD/Range, Tauri, immutability, nested routes, safe logs, WAL, migrations, SIGTERM.")
         finally:
             if process.poll() is None:
                 process.kill()

@@ -18,6 +18,16 @@ pub const MAX_ICON_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ICON_DIMENSION: u32 = 1024;
 const MAX_STORED_BYTES: u64 = 5 * 1024 * 1024;
 
+pub enum IconFormat {
+    Png,
+    Svg,
+}
+
+pub struct StoredIcon {
+    pub bytes: Vec<u8>,
+    pub format: IconFormat,
+}
+
 #[derive(Clone)]
 pub struct IconStorage {
     directory: PathBuf,
@@ -75,36 +85,20 @@ impl IconStorage {
         let directory = self.directory.clone();
         blocking(move || {
             let _permit = permit;
-            let format = image::guess_format(&bytes).map_err(|_| ServiceError::InvalidIcon)?;
-            if !matches!(
-                format,
-                ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP
-            ) {
-                return Err(ServiceError::InvalidIcon);
-            }
-            let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
-            let mut limits = Limits::default();
-            limits.max_image_width = Some(MAX_ICON_DIMENSION);
-            limits.max_image_height = Some(MAX_ICON_DIMENSION);
-            limits.max_alloc = Some(32 * 1024 * 1024);
-            reader.limits(limits);
-            let decoded = reader.decode().map_err(|_| ServiceError::InvalidIcon)?;
-            if decoded.width() == 0 || decoded.height() == 0 {
-                return Err(ServiceError::InvalidIcon);
-            }
-            // Re-encoding strips untrusted metadata and trailing non-image content.
-            let mut png = Cursor::new(Vec::new());
-            decoded
-                .to_rgba8()
-                .write_to(&mut png, ImageFormat::Png)
-                .map_err(|e| ServiceError::Internal(e.into()))?;
+            let (content, extension) = match image::guess_format(&bytes) {
+                Ok(format @ (ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP)) => {
+                    (normalize_raster(bytes, format)?, "png")
+                }
+                Ok(_) => return Err(ServiceError::InvalidIcon),
+                Err(_) => (sanitize_svg(&bytes)?, "svg"),
+            };
             let id = uuid::Uuid::new_v4().simple().to_string();
-            let key = format!("{id}.png");
+            let key = format!("{id}.{extension}");
             let temporary = format!("{id}.tmp");
             let root = Dir::open_ambient_dir(directory, ambient_authority())?;
             let mut file =
                 root.open_with(&temporary, OpenOptions::new().write(true).create_new(true))?;
-            file.write_all(png.get_ref())?;
+            file.write_all(&content)?;
             file.sync_all()?;
             drop(file);
             root.rename(&temporary, &root, &key)?;
@@ -113,7 +107,7 @@ impl IconStorage {
         })
         .await
     }
-    pub async fn read(&self, key: &str) -> Result<Vec<u8>> {
+    pub async fn read(&self, key: &str) -> Result<StoredIcon> {
         if !valid_key(key) {
             return Err(ServiceError::NotFound);
         }
@@ -134,18 +128,93 @@ impl IconStorage {
             if bytes.len() as u64 > MAX_STORED_BYTES {
                 return Err(ServiceError::InvalidIcon);
             }
-            Ok(bytes)
+            Ok(StoredIcon {
+                bytes,
+                format: if key.ends_with(".svg") {
+                    IconFormat::Svg
+                } else {
+                    IconFormat::Png
+                },
+            })
         })
         .await
     }
 }
 fn valid_key(key: &str) -> bool {
     key.len() == 36
-        && key.ends_with(".png")
+        && (key.ends_with(".png") || key.ends_with(".svg"))
         && key
             .bytes()
             .take(32)
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+fn normalize_raster(bytes: Vec<u8>, format: ImageFormat) -> Result<Vec<u8>> {
+    let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_ICON_DIMENSION);
+    limits.max_image_height = Some(MAX_ICON_DIMENSION);
+    limits.max_alloc = Some(32 * 1024 * 1024);
+    reader.limits(limits);
+    let decoded = reader.decode().map_err(|_| ServiceError::InvalidIcon)?;
+    if decoded.width() == 0 || decoded.height() == 0 {
+        return Err(ServiceError::InvalidIcon);
+    }
+    // Re-encoding strips untrusted metadata and trailing non-image content.
+    let mut png = Cursor::new(Vec::new());
+    decoded
+        .to_rgba8()
+        .write_to(&mut png, ImageFormat::Png)
+        .map_err(|e| ServiceError::Internal(e.into()))?;
+    Ok(png.into_inner())
+}
+
+fn sanitize_svg(bytes: &[u8]) -> Result<Vec<u8>> {
+    use xml::{ParserConfig, reader::XmlEvent};
+
+    // Bound XML complexity before the sanitizer, including discarded elements.
+    let parser = ParserConfig::new()
+        .allow_multiple_root_elements(false)
+        .max_attributes(200)
+        .max_name_length(1000)
+        .max_attribute_length(MAX_ICON_BYTES)
+        .max_data_length(MAX_ICON_BYTES)
+        .max_entity_expansion_depth(0)
+        .max_entity_expansion_length(MAX_ICON_BYTES)
+        .create_reader(bytes);
+    let mut depth = 0;
+    for (count, event) in parser.into_iter().enumerate() {
+        if count >= 100_000 {
+            return Err(ServiceError::InvalidIcon);
+        }
+        match event.map_err(|_| ServiceError::InvalidIcon)? {
+            XmlEvent::StartElement { name, .. } => {
+                if depth == 0
+                    && (name.local_name != "svg"
+                        || name.namespace.as_deref() != Some("http://www.w3.org/2000/svg"))
+                {
+                    return Err(ServiceError::InvalidIcon);
+                }
+                depth += 1;
+                if depth > 64 {
+                    return Err(ServiceError::InvalidIcon);
+                }
+            }
+            XmlEvent::EndElement { .. } => depth -= 1,
+            XmlEvent::Doctype { .. } => return Err(ServiceError::InvalidIcon),
+            _ => {}
+        }
+    }
+    // A fixed-size writer also bounds expansion caused by escaping/indentation.
+    let mut output = vec![0; MAX_STORED_BYTES as usize];
+    let mut destination = Cursor::new(output.as_mut_slice());
+    let mut filter = svg_hush::Filter::new();
+    filter.set_data_url_filter(svg_hush::data_url_filter::allow_standard_images);
+    filter
+        .filter(bytes, &mut destination)
+        .map_err(|_| ServiceError::InvalidIcon)?;
+    let length = destination.position() as usize;
+    output.truncate(length);
+    Ok(output)
 }
 fn valid_temporary(key: &str) -> bool {
     key.strip_suffix(".tmp")

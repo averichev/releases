@@ -38,6 +38,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal
 tower-http = { version = "0.6", features = ["trace", "compression-gzip", "set-header", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+svg-hush = "0.9.7"
+xml = "1.4"
 
 [dev-dependencies]
 http-body-util = "0.1"

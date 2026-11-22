@@ -231,7 +231,7 @@ impl IntoResponse for ApiError {
             Self::InvalidIcon => (
                 StatusCode::BAD_REQUEST,
                 "invalid_icon",
-                "Use a valid PNG, JPEG or WebP up to 2 MiB and 1024x1024 pixels",
+                "Use a valid SVG, PNG, JPEG or WebP up to 2 MiB; raster images up to 1024x1024 pixels",
             ),
         };
         (

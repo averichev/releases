@@ -265,16 +265,9 @@ async fn icon(
 ) -> Result<Response, ApiError> {
     let Path(slug) = path.map_err(|_| ApiError::NotFound)?;
     let app = state.distribution.application(&slug, true).await?;
-    let bytes = state.applications.icon(&app.id).await?;
+    let icon = state.applications.icon(&app.id).await?;
     state.distribution.recheck(&app.id).await?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            (header::CACHE_CONTROL, "private, no-cache, must-revalidate"),
-        ],
-        bytes,
-    )
-        .into_response())
+    Ok(super::icons::response(icon))
 }
 async fn tauri(
     Extension(state): Extension<AppState>,

@@ -32,7 +32,7 @@ const messages: Record<string, string> = {
   storage_full: 'На сервере закончилось место. Обратитесь к администратору сервера.',
   storage_unavailable: 'Файл в хранилище отсутствует или повреждён. Требуется проверка сервера.',
   storage_busy: 'Сервер обрабатывает другие файлы. Повторите позже.',
-  invalid_icon: 'Выберите PNG, JPEG или WebP до 2 МиБ, не более 1024×1024 пикселей.',
+  invalid_icon: 'Выберите корректный SVG, PNG, JPEG или WebP до 2 МиБ. Растровые изображения — не более 1024×1024 пикселей.',
 };
 const httpMessages: Partial<Record<number, string>> = {
   401: messages.unauthorized,

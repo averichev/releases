@@ -13,7 +13,7 @@ use axum::{
         DefaultBodyLimit, Path, Query,
         rejection::{BytesRejection, JsonRejection, PathRejection, QueryRejection},
     },
-    http::{StatusCode, header},
+    http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{get, post},
@@ -279,11 +279,7 @@ async fn icon(
     Extension(state): Extension<AppState>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
+    Ok(super::icons::response(
         state.applications.icon(&id(path)?).await?,
     ))
 }
