@@ -390,22 +390,33 @@ async fn release_lifecycle_uniqueness_sort_search_and_archival() {
     app.call("GET", &path, Value::Null, 404).await;
 }
 #[tokio::test]
-async fn macos_universal_is_offered_and_accepted_for_upload() {
+async fn macos_universal_and_linux_x86_64_are_offered_and_accepted_for_upload() {
     let app = TestApp::new().await;
     let options = app
         .call("GET", "/api/v1/admin/artifact-options", Value::Null, 200)
         .await;
-    assert!(
-        options["targets"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("darwin-universal"))
-    );
-    let artifact = app
-        .upload("installer.dmg", "darwin-universal", b"universal", 201)
-        .await;
-    assert_eq!(artifact["target"], "darwin-universal");
-    assert_eq!(artifact["file_type"], "dmg");
+    for (target, filename, file_type) in [
+        ("darwin-universal", "installer.dmg", "dmg"),
+        ("linux-x86_64", "program.x86_64", "x86_64"),
+        ("linux-x86_64", "program-1.2.0-linux-x86_64", "bin"),
+    ] {
+        assert!(
+            options["targets"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(target))
+        );
+        assert!(
+            options["file_types"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(file_type))
+        );
+        let artifact = app.upload(filename, target, b"package", 201).await;
+        assert_eq!(artifact["target"], target);
+        assert_eq!(artifact["filename"], filename);
+        assert_eq!(artifact["file_type"], file_type);
+    }
     for target in ["windows-universal", "linux-universal"] {
         app.upload("installer.bin", target, b"invalid", 422).await;
     }

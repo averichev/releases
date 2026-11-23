@@ -157,6 +157,10 @@ a { color: #236b54; }
 .upload-file-summary, .upload-progress { margin-top: 16px; }
 .upload-file-summary { overflow-wrap: anywhere; }
 .upload-progress { margin-bottom: 16px; }
+.upload-format-options { margin-block: 16px; }
+.upload-format-options .ant-form-item { margin-bottom: 0; }
+.artifact-platform-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+@media (max-width: 600px) { .artifact-platform-fields { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
   .release-info .ant-card-head, .release-artifacts .ant-card-head { align-items: flex-start; padding-top: 16px; padding-bottom: 16px; }
   .release-info .ant-card-head-wrapper, .release-artifacts .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; }

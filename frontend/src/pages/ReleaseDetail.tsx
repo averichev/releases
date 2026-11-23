@@ -75,7 +75,7 @@ export default function ReleaseDetail() {
     {release.status === 'published' && <PublishedDistribution app={id} release={releaseId} revision={release.revision} />}
     {editable && <Card className="release-delete" title="Удаление черновика"><Typography.Paragraph type="secondary">Удаляется релиз вместе со всеми его файлами.</Typography.Paragraph><Button danger disabled={busy || uploadBusy} onClick={() => remove()}>Удалить черновик</Button></Card>}
     <Modal title="Редактирование релиза" open={editing} footer={null} destroyOnHidden closable={!busy} keyboard={!busy} mask={{ closable: !busy }} onCancel={() => { if (!busy) setEditing(false); }}>{error && <Alert className="form-alert" type="error" title={error} showIcon />}<ReleaseForm release={release} busy={busy} onSubmit={(values) => { void update(values); }} /></Modal>
-    <Modal title="Загрузка дистрибутива" open={uploading} footer={null} destroyOnHidden closable={!uploadBusy} keyboard={!uploadBusy} mask={{ closable: !uploadBusy }} onCancel={() => { if (!uploadBusy) setUploading(false); }}><ArtifactUploader applicationId={id} releaseId={releaseId} artifacts={artifacts} options={options} published={release.status === 'published'} onChange={() => { void refresh(); }} onBusy={setUploadBusy} /></Modal>
+    <Modal title="Загрузка дистрибутива" width={720} open={uploading} footer={null} destroyOnHidden closable={!uploadBusy} keyboard={!uploadBusy} mask={{ closable: !uploadBusy }} onCancel={() => { if (!uploadBusy) setUploading(false); }}><ArtifactUploader applicationId={id} releaseId={releaseId} artifacts={artifacts} options={options} published={release.status === 'published'} onChange={() => { void refresh(); }} onBusy={setUploadBusy} /></Modal>
   </>;
 }
 

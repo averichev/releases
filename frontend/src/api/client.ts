@@ -7,6 +7,7 @@ export interface IssuedLink { activation_url: string; expires_at: number }
 let csrfToken: string | undefined;
 export function setCsrf(value?: string) { csrfToken = value; }
 const messages: Record<string, string> = {
+  invalid_standalone: 'Проверьте подпись .jws, UUID продукта, публичный ключ, версию и платформу файла. Подпись должна соответствовать этому исполняемому файлу.',
   invalid_request: 'Проверьте введённые данные. Логин: 3–64 символа a-z, 0-9, ._-. Пароль: 12–128 символов.',
   invalid_credentials: 'Неверный логин или пароль.', unauthorized: 'Сессия истекла. Войдите снова.',
   forbidden: 'Недостаточно прав или проверка безопасности не пройдена. Обновите страницу.',

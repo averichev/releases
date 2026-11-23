@@ -10,7 +10,7 @@ pub const TARGETS: &[&str] = &[
     "any",
 ];
 pub const FILE_TYPES: &[&str] = &[
-    "exe", "msi", "bin", "zip", "tar.gz", "dmg", "appimage", "deb", "rpm",
+    "exe", "msi", "bin", "x86_64", "zip", "tar.gz", "dmg", "appimage", "deb", "rpm",
 ];
 // Keep the existing updater code and API field: this is the artifact's single classification.
 pub const ARTIFACT_TYPES: &[&str] = &["executable", "installer", "updater", "archive"];
@@ -36,6 +36,31 @@ pub struct UploadMetadata {
     pub target: String,
     pub file_type: Option<String>,
     pub distribution_role: Option<String>,
+}
+impl UploadMetadata {
+    pub fn file_type(&self) -> Option<String> {
+        // A canonical platform suffix is part of a binary's name, not an
+        // extension after a version dot: product-1.2.0-linux-x86_64 is extensionless.
+        if matches!(
+            self.distribution_role.as_deref(),
+            None | Some("executable" | "installer")
+        ) && self.target != "any"
+            && TARGETS.contains(&self.target.as_str())
+            && self
+                .filename
+                .to_ascii_lowercase()
+                .ends_with(&format!("-{}", self.target))
+        {
+            let value = self
+                .file_type
+                .as_deref()
+                .unwrap_or("bin")
+                .trim()
+                .to_ascii_lowercase();
+            return valid_file_type(&value).then_some(value);
+        }
+        file_type(&self.filename, self.file_type.as_deref())
+    }
 }
 pub fn valid_filename(value: &str) -> bool {
     !value.trim().is_empty()

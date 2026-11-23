@@ -259,10 +259,43 @@ impl TestApp {
         } else {
             "product.bin"
         };
+        self.multipart_metadata(
+            r,
+            UploadMetadata {
+                filename: filename.into(),
+                target: target.into(),
+                file_type: None,
+                distribution_role: None,
+            },
+            jws,
+            truncated,
+        )
+        .await
+    }
+    async fn multipart_metadata(
+        &self,
+        r: &Release,
+        metadata: UploadMetadata,
+        jws: Option<&str>,
+        truncated: bool,
+    ) -> Response {
         let mut form = format!(
-            "--BOUNDARY\r\nContent-Disposition: form-data; name=\"target\"\r\n\r\n{target}\r\n--BOUNDARY\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n{}\r\n",
-            std::str::from_utf8(CONTENT).unwrap()
+            "--BOUNDARY\r\nContent-Disposition: form-data; name=\"target\"\r\n\r\n{}\r\n",
+            metadata.target
         );
+        for (name, value) in [
+            ("file_type", metadata.file_type),
+            ("distribution_role", metadata.distribution_role),
+        ] {
+            if let Some(value) = value {
+                form.push_str(&format!("--BOUNDARY\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"));
+            }
+        }
+        form.push_str(&format!(
+            "--BOUNDARY\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\nContent-Type: application/octet-stream\r\n\r\n{}\r\n",
+            metadata.filename,
+            std::str::from_utf8(CONTENT).unwrap()
+        ));
         if let Some(jws) = jws {
             form.push_str(&format!("--BOUNDARY\r\nContent-Disposition: form-data; name=\"standalone_signature\"; filename=\"product.jws\"\r\n\r\n{jws}\r\n"));
         }
@@ -306,6 +339,232 @@ impl TestApp {
 }
 async fn body(r: Response) -> Value {
     serde_json::from_slice(&r.into_body().collect().await.unwrap().to_bytes()).unwrap()
+}
+
+#[tokio::test]
+async fn signed_executables_use_canonical_target_independently_of_filename_format() {
+    let t = TestApp::new().await;
+    let r = t.create("0.7.0").await;
+    for (target, filename) in [
+        ("linux-x86_64", "product-0.7.0-linux-x86_64"),
+        ("linux-aarch64", "product.aarch64"),
+        ("darwin-aarch64", "product-0.7.0-darwin-aarch64.tool"),
+        ("windows-x86_64", "product-0.7.0-windows-x86_64.exe"),
+    ] {
+        let upload_metadata = || UploadMetadata {
+            filename: filename.into(),
+            target: target.into(),
+            file_type: None,
+            distribution_role: Some("executable".into()),
+        };
+        // CPU aliases and another ABI cannot be smuggled in through signed fields.
+        for arch in ["x64", "arm64", "unknown"] {
+            let mut claims = metadata(&t.product, "0.7.0", target);
+            claims["arch"] = json!(arch);
+            assert_eq!(
+                t.multipart_metadata(&r, upload_metadata(), Some(&sign(&claims)), false)
+                    .await
+                    .status(),
+                422
+            );
+        }
+        let signature = sign(&metadata(&t.product, "0.7.0", target));
+        let response = t
+            .multipart_metadata(&r, upload_metadata(), Some(&signature), false)
+            .await;
+        let status = response.status();
+        let artifact = body(response).await;
+        assert_eq!(status, 201, "{target}: {artifact}");
+        assert_eq!(artifact["target"], target);
+        assert_eq!(artifact["filename"], filename);
+        if filename == "product-0.7.0-linux-x86_64" {
+            assert_eq!(artifact["file_type"], "bin");
+        }
+        assert_eq!(artifact["distribution_role"], "executable");
+        assert_eq!(artifact["standalone_signature_present"], true);
+        assert_eq!(artifact["signature_present"], false);
+        if target == "windows-x86_64" {
+            for role in ["installer", "executable"] {
+                let changed = t
+                    .state
+                    .artifacts
+                    .set_updater(
+                        &t.actor,
+                        &t.app,
+                        &r.id,
+                        artifact["id"].as_str().unwrap(),
+                        Some(role),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    changed.standalone_signature.as_deref(),
+                    Some(signature.as_str())
+                );
+            }
+        }
+        assert!(matches!(
+            t.state
+                .artifacts
+                .set_updater(
+                    &t.actor,
+                    &t.app,
+                    &r.id,
+                    artifact["id"].as_str().unwrap(),
+                    Some("archive"),
+                    None
+                )
+                .await,
+            Err(ServiceError::InvalidStandalone)
+        ));
+    }
+    // The one-signed-file-per-target rule spans both classifications and formats.
+    let duplicate = t
+        .multipart_metadata(
+            &r,
+            UploadMetadata {
+                filename: "legacy.bin".into(),
+                target: "linux-x86_64".into(),
+                file_type: None,
+                distribution_role: Some("installer".into()),
+            },
+            Some(&sign(&metadata(&t.product, "0.7.0", "linux-x86_64"))),
+            false,
+        )
+        .await;
+    assert_eq!(duplicate.status(), 409);
+    t.publish(&r).await.unwrap();
+    for target in [
+        "linux-x86_64",
+        "linux-aarch64",
+        "darwin-aarch64",
+        "windows-x86_64",
+    ] {
+        let response = t.update(target, "0.6.0").await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(body(response).await["version"], "0.7.0");
+        assert_eq!(t.update(target, "0.7.0").await.status(), 204);
+        assert_eq!(t.update(target, "0.8.0").await.status(), 204);
+    }
+    let manifest = body(t.get("/product/manifest.json").await).await;
+    assert_eq!(
+        manifest["latest_by_type"]["executable"]["linux-x86_64"]["version"],
+        "0.7.0"
+    );
+    assert_eq!(manifest["latest_by_target"], json!({}));
+    t.assert_storage_count(4).await;
+}
+
+#[tokio::test]
+async fn executable_migration_preserves_signatures_counters_and_database_guards() {
+    let dir = tempdir().unwrap();
+    let old_migrations = dir.path().join("old-migrations");
+    std::fs::create_dir(&old_migrations).unwrap();
+    for entry in std::fs::read_dir("migrations").unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_str().unwrap() < "0015" {
+            std::fs::copy(entry.path(), old_migrations.join(entry.file_name())).unwrap();
+        }
+    }
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(sqlx::sqlite::SqliteConnectOptions::new().foreign_keys(true))
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator::new(old_migrations.as_path())
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+    let app = uuid::Uuid::new_v4().to_string();
+    let product = uuid::Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO applications(id,slug,name,name_search,product_id,standalone_public_key) VALUES(?,'product','Product','product',?,?)")
+        .bind(&app).bind(&product).bind(PUBLIC_KEY).execute(&pool).await.unwrap();
+    let snapshot = "SELECT json_object('id',id,'release',release_id,'filename',filename,'target',target,'format',file_type,'role',distribution_role,'signature',standalone_signature,'size',size_bytes,'sha256',sha256,'key',storage_key,'created',created_at) FROM artifacts ORDER BY id";
+    let mut records = Vec::new();
+    for (version, status) in [("0.5.0", "published"), ("0.6.0", "draft")] {
+        let release = uuid::Uuid::new_v4().to_string();
+        let artifact = uuid::Uuid::new_v4().to_string();
+        let storage_key = format!("{}.blob", uuid::Uuid::new_v4().simple());
+        let signature = sign(&metadata(&product, version, "linux-x86_64"));
+        sqlx::query("INSERT INTO releases(id,application_id,version,version_key,status,created_at,updated_at,published_at) VALUES(?,?,?,?,?,1,1,?)")
+            .bind(&release).bind(&app).bind(version).bind(version).bind(status).bind((status == "published").then_some(1_i64)).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,standalone_signature) VALUES(?,?,'product','linux-x86_64','bin',?,?,?,?,?)")
+            .bind(&artifact).bind(&release).bind(CONTENT.len() as i64).bind(format!("{:x}",Sha256::digest(CONTENT))).bind(&storage_key).bind(1_i64).bind(&signature).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO artifact_download_counts VALUES(?,17)")
+            .bind(&artifact)
+            .execute(&pool)
+            .await
+            .unwrap();
+        records.push((release, artifact));
+    }
+    let before: Vec<String> = sqlx::query_scalar(snapshot).fetch_all(&pool).await.unwrap();
+    let counters: Vec<(String, i64)> =
+        sqlx::query_as("SELECT * FROM artifact_download_counts ORDER BY artifact_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    sqlx::migrate!().run(&pool).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(snapshot)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, i64)>(
+            "SELECT * FROM artifact_download_counts ORDER BY artifact_id"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap(),
+        counters
+    );
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        sqlx::query("UPDATE artifacts SET standalone_signature=NULL WHERE id=?")
+            .bind(&records[0].1)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE applications SET standalone_public_key=NULL WHERE id=?")
+            .bind(&app)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE artifacts SET distribution_role='archive' WHERE id=?")
+            .bind(&records[1].1)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    // A signed legacy installer can become an executable in a draft without losing its JWS.
+    sqlx::query("UPDATE artifacts SET distribution_role='executable' WHERE id=?")
+        .bind(&records[1].1)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT standalone_signature FROM artifacts WHERE id=?")
+            .bind(&records[1].1)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        sign(&metadata(&product, "0.6.0", "linux-x86_64"))
+    );
 }
 
 #[tokio::test]

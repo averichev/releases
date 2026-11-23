@@ -40,7 +40,7 @@ pub struct ArtifactUpload {
 }
 impl ArtifactUpload {
     pub fn set_standalone_signature(&mut self, bytes: &[u8]) -> Result<()> {
-        if self.distribution_role != "installer"
+        if !matches!(self.distribution_role.as_str(), "executable" | "installer")
             || bytes.is_empty()
             || bytes.len() > crate::domain::standalone::MAX_SIGNATURE_BYTES
         {
@@ -96,8 +96,7 @@ impl ArtifactManagement {
         {
             return Err(ServiceError::InvalidArtifact);
         }
-        let file_type = artifact::file_type(&metadata.filename, metadata.file_type.as_deref())
-            .ok_or(ServiceError::InvalidArtifact)?;
+        let file_type = metadata.file_type().ok_or(ServiceError::InvalidArtifact)?;
         let role = metadata.distribution_role.as_deref().unwrap_or("installer");
         if !artifact::ARTIFACT_TYPES.contains(&role) {
             return Err(ServiceError::InvalidArtifact);
@@ -247,7 +246,9 @@ impl ArtifactManagement {
                 return Err(ServiceError::InvalidUpdater);
             }
             artifact.distribution_role = role.into();
-            if role != "installer" && artifact.standalone_signature.is_some() {
+            if artifact.standalone_signature.is_some()
+                && !crate::domain::standalone::compatible(&artifact)
+            {
                 return Err(ServiceError::InvalidStandalone);
             }
             if role != "updater" {

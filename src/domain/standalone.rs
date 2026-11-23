@@ -27,11 +27,13 @@ pub fn target(value: &str) -> bool {
 }
 pub fn compatible(artifact: &Artifact) -> bool {
     target(&artifact.target)
-        && artifact.distribution_role == "installer"
-        && if artifact.target.starts_with("windows-") {
-            artifact.file_type == "exe"
-        } else {
-            artifact.file_type == "bin"
+        && match artifact.distribution_role.as_str() {
+            // Executables may have no extension, version dots, .tool or .x86_64.
+            // The signed os/arch identifies the ABI; a filename suffix does not.
+            "executable" => true,
+            "installer" if artifact.target.starts_with("windows-") => artifact.file_type == "exe",
+            "installer" => artifact.file_type == "bin",
+            _ => false,
         }
 }
 /// Public Ed25519 JWK `x`, exactly 32 bytes; private-key packets are rejected.

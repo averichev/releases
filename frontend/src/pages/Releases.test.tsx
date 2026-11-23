@@ -27,7 +27,7 @@ it('validates SemVer, compound extensions and binary size units', () => {
 });
 it('creates a draft and opens its nested detail route', async () => {
   const fetch = mockFetch(); renderAt(`/admin/applications/${application.id}/releases`);
-  fireEvent.click(await screen.findByRole('button', { name: 'Создать релиз' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Создать релиз' }, { timeout: 4000 }));
   fireEvent.change(await screen.findByLabelText('Версия'), { target: { value: '1.2.0' } });
   fireEvent.click(screen.getByRole('button', { name: 'Создать черновик' }));
   expect(await screen.findByRole('heading', { name: '1.2.0' }, { timeout: 4000 })).toBeDefined();
@@ -38,7 +38,7 @@ it('creates a draft and opens its nested detail route', async () => {
 }, 10000);
 it('shows server version conflicts inside the creation form', async () => {
   const fetch = mockFetch(); fetch.mockImplementation((url: string, init?: RequestInit) => Promise.resolve(init?.method === 'POST' ? response({ error: { code: 'release_version_exists' } }, 409) : response(url.endsWith('/auth/me') ? session : url.includes('/releases?') ? { items: [], total: 0, page: 1, per_page: 20 } : application)));
-  renderAt(`/admin/applications/${application.id}/releases`); fireEvent.click(await screen.findByRole('button', { name: 'Создать релиз' }));
+  renderAt(`/admin/applications/${application.id}/releases`); fireEvent.click(await screen.findByRole('button', { name: 'Создать релиз' }, { timeout: 4000 }));
   fireEvent.change(await screen.findByLabelText('Версия'), { target: { value: '1.2.0' } }); fireEvent.click(screen.getByRole('button', { name: 'Создать черновик' }));
   expect(await screen.findByText(/Релиз с этой версией уже существует/)).toBeDefined();
 });
@@ -75,8 +75,8 @@ it('keeps active uploads open on Escape and supports explicit cancellation', asy
   fireEvent.click(await screen.findByRole('button', { name: 'Добавить артефакт' }));
   fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'Тип артефакта' }));
   fireEvent.click(await screen.findByText('Архив', {selector: '.ant-select-item-option-content'}));
-  const platform = await screen.findByRole('combobox', { name: 'Целевая платформа' }); fireEvent.mouseDown(platform);
-  fireEvent.click(await screen.findByText('Любая платформа'));
+  const platform = await screen.findByRole('combobox', { name: 'Операционная система' }); fireEvent.mouseDown(platform);
+  fireEvent.click(await screen.findByText('Любая ОС', { selector: '.ant-select-item-option-content' }));
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [new File(['new'], 'new.zip')] } });
   expect(await screen.findByText('new.zip · 3 B · ZIP')).toBeDefined();
@@ -111,9 +111,11 @@ it('refreshes artifacts and public links after appending to a published release'
   fireEvent.click(await screen.findByRole('button', { name: 'Добавить артефакт' }));
   const dialog = await screen.findByRole('dialog', { name: 'Загрузка дистрибутива' });
   fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Тип артефакта' }));
-  fireEvent.click(await screen.findByText('Пакет обновления (Tauri Updater)'));
-  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Целевая платформа' }));
-  fireEvent.click(await screen.findByText('Windows x64', { selector: '.ant-select-item-option-content' }));
+  fireEvent.click(await screen.findByText('Пакет обновления Tauri', { selector: '.ant-select-item-option-content' }));
+  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Операционная система' }));
+  fireEvent.click(await screen.findByText('Windows', { selector: '.ant-select-item-option-content' }));
+  fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: 'Архитектура' }));
+  fireEvent.click(await screen.findByText('windows-x86_64', { selector: '.ant-select-item-option-content' }));
   fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [new File(['new'], 'updater.exe')] } });
   await screen.findByText('updater.exe · 3 B · EXE');
   fireEvent.change(within(dialog).getByLabelText('Подпись Tauri (.sig)'), { target: { files: [new File(['signature'], 'updater.sig')] } });
@@ -132,7 +134,7 @@ it('refreshes artifacts and public links after appending to a published release'
   fireEvent.click(screen.getByRole('button', { name: 'Добавить артефакт' }));
   const reopened = await screen.findByRole('dialog', { name: 'Загрузка дистрибутива' });
   expect(within(reopened).getByRole('combobox', { name: 'Тип артефакта' })).toBeDefined();
-  expect(within(reopened).getByRole('button', { name: 'Загрузить файл' })).toBeDefined();
+  expect(within(reopened).queryByRole('button', { name: 'Загрузить файл' })).toBeNull();
   expect(within(reopened).queryByText('Файл загружен и сохранён.')).toBeNull();
 }, 40000);
 

@@ -15,6 +15,7 @@ export default function ArtifactUpdater({ app, release, artifact, editable, disa
   }
   return <Space orientation="vertical">
     {editable ? <Select id={`artifact-role-${artifact.id}`} aria-label={`Тип артефакта ${artifact.filename}`} value={artifact.distribution_role ?? 'installer'} disabled={disabled || busy} onChange={(role) => { void change(role); }} options={artifactTypes} /> : <Tag>{artifactTypeName(artifact.distribution_role ?? 'installer')}</Tag>}
+    {artifact.standalone_signature_present && <Tag color="green">Подпись standalone прикреплена</Tag>}
     {artifact.distribution_role === 'updater' && <><Tag color={artifact.signature_present ? 'green' : 'orange'}>{artifact.signature_present ? 'Подпись прикреплена' : 'Нет подписи'}</Tag>
       {editable && <><label className="signature-picker">{artifact.signature_present ? 'Заменить .sig' : 'Добавить .sig'}<input aria-label={`Подпись ${artifact.filename}`} type="file" accept=".sig" disabled={disabled || busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void change(undefined, file); }} /></label>{artifact.signature_present && <Button size="small" disabled={disabled || busy} onClick={() => { void change(undefined, undefined, true); }}>Удалить подпись</Button>}</>}
     </>}
