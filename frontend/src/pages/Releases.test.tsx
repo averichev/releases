@@ -88,6 +88,9 @@ it('keeps active uploads open on Escape and supports explicit cancellation', asy
   expect(within(dialog).getByRole('button', { name: 'Отменить загрузку' })).toBeDefined();
   fireEvent.click(cancel);
   expect(await screen.findByText(/Загрузка отменена/)).toBeDefined();
+  expect(within(dialog).getByRole('combobox', { name: 'Тип артефакта' })).toBeDefined();
+  expect(within(dialog).getByRole('button', { name: 'Загрузить файл' })).toBeDefined();
+  expect(within(dialog).queryByText('Файл загружен и сохранён.')).toBeNull();
   expect(within(dialog).queryByRole('button', { name: 'Отменить загрузку' })).toBeNull();
   expect(within(dialog).getByRole('button', { name: /close|закрыть/i })).toBeDefined();
 }, 40000);
@@ -116,10 +119,21 @@ it('refreshes artifacts and public links after appending to a published release'
   fireEvent.change(within(dialog).getByLabelText('Подпись Tauri (.sig)'), { target: { files: [new File(['signature'], 'updater.sig')] } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Загрузить файл' }));
   expect(await screen.findByText('Файл загружен и сохранён.')).toBeDefined();
+  expect(within(dialog).queryByRole('combobox', { name: 'Тип артефакта' })).toBeNull();
+  expect(within(dialog).queryByRole('button', { name: 'Загрузить файл' })).toBeNull();
+  expect(dialog.querySelector('form')).toBeNull();
+  expect(within(dialog).queryByText(/Релиз опубликован\. После добавления/)).toBeNull();
   expect(await screen.findByText('updater.exe', { selector: '.artifact-filename' })).toBeDefined();
   expect(await screen.findByRole('link', { name: 'https://example.test/new-updater' })).toBeDefined();
   expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
   expect(screen.queryByRole('combobox', { name: 'Тип артефакта updater.exe' })).toBeNull();
+  fireEvent.click(within(dialog).getByRole('button', { name: /close|закрыть/i }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Загрузка дистрибутива' })).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Добавить артефакт' }));
+  const reopened = await screen.findByRole('dialog', { name: 'Загрузка дистрибутива' });
+  expect(within(reopened).getByRole('combobox', { name: 'Тип артефакта' })).toBeDefined();
+  expect(within(reopened).getByRole('button', { name: 'Загрузить файл' })).toBeDefined();
+  expect(within(reopened).queryByText('Файл загружен и сохранён.')).toBeNull();
 }, 40000);
 
 it('shows separate release and artifact download counts and refreshes them from the API', async () => {

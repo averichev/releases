@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { InboxOutlined } from '@ant-design/icons';
-import { Alert, Button, Form, Input, Progress, Select, Space, Typography, Upload } from 'antd';
+import { Alert, Button, Form, Input, Progress, Result, Select, Space, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { upload } from '../api/client';
 import { artifactTypes, artifactsPath, detectedType, releaseError, size, targetName, type Artifact, type ArtifactType, type UploadOptions } from '../api/releases';
@@ -8,6 +8,7 @@ export default function ArtifactUploader({ applicationId, releaseId, artifacts, 
   const [file, setFile] = useState<File>(); const [target, setTarget] = useState<string>(); const [format, setFormat] = useState('');
   const [role, setRole] = useState<ArtifactType>(); const [signature, setSignature] = useState<File>();
   const [busy, setBusy] = useState(false); const [percent, setPercent] = useState(0); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [uploaded, setUploaded] = useState(false);
   const controller = useRef<AbortController | null>(null); const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort(); }; }, []);
   async function send() {
@@ -21,7 +22,7 @@ export default function ArtifactUploader({ applicationId, releaseId, artifacts, 
     const data = new FormData(); data.append('target', target); data.append('distribution_role', role); if (format.trim()) data.append('file_type', format.trim()); data.append('file', file, file.name); if (role === 'updater' && signature) data.append('signature', signature, signature.name);
     try {
       await upload<Artifact>(artifactsPath(applicationId, releaseId), data, pending.signal, setPercent);
-      if (mounted.current) { setFile(undefined); setSignature(undefined); setNotice('Файл загружен и сохранён.'); }
+      if (mounted.current) { setFile(undefined); setSignature(undefined); setUploaded(true); }
     } catch (error) {
       if (mounted.current) {
         if (error instanceof DOMException && error.name === 'AbortError') setNotice('Загрузка отменена. Если сервер уже завершил сохранение, файл появится в списке.');
@@ -32,6 +33,7 @@ export default function ArtifactUploader({ applicationId, releaseId, artifacts, 
       if (mounted.current) { setBusy(false); onBusy(false); onChange(); }
     }
   }
+  if (uploaded) return <Result status="success" title="Файл загружен и сохранён." />;
   const files: UploadFile[] = file ? [{ uid: 'selected', name: file.name, size: file.size, status: 'done' }] : [];
   return <>
     {published && <Alert className="form-alert" type="warning" showIcon title="Релиз опубликован. После добавления файл нельзя будет изменить или удалить." />}
