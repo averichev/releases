@@ -5,7 +5,7 @@
 | URL | Результат |
 | --- | --- |
 | `/` | Список active/public приложений с опубликованными релизами; название и логотип ведут на `/{slug}` |
-| `/{slug}` | Страница актуальных исполняемых файлов, установщиков и архивов каждой платформы и истории |
+| `/{slug}` | Страница актуальных файлов и истории версий; ссылка на JSON-манифест с кнопкой копирования URL |
 | `/{slug}/latest` | 307 на страницу выбора |
 | `/{slug}/latest/windows-x86_64` | Максимальный опубликованный SemVer с installer для Windows x64 |
 | `/{slug}/latest/windows-aarch64` | То же для Windows ARM64 |
@@ -21,7 +21,7 @@
 | `/{slug}/releases/{version}/artifacts/{uuid}/download` | Постоянная ссылка на конкретный файл |
 | `/{slug}/manifest.json?limit=20` | Манифест schema_version=2 |
 | `/api/v1/public/applications?limit=20&offset=0` | items (name, slug, icon_url), total, limit, offset; по алфавиту, только active/public с published-релизами |
-| `/api/v1/public/applications/{slug}` | name, description, slug, icon_url, latest_by_target, latest_by_type |
+| `/api/v1/public/applications/{slug}` | name, description, slug, icon_url, manifest_url, latest_by_target, latest_by_type |
 | `/api/v1/public/applications/{slug}/releases?limit=20&offset=0` | items, total, limit, offset; опубликованная история по SemVer |
 | `/api/v1/public/applications/{slug}/icon` | Иконка приложения |
 | `/api/v1/updates/tauri/{slug}/{target}/{arch}/{currentVersion}` | Tauri updater |
@@ -34,7 +34,7 @@ Latest выбирает максимальный опубликованный Se
 
 Режим `download.delivery=direct` передаёт файл через Rust. `nginx` использует X-Accel-Redirect только после тех же проверок. Nginx location должен быть internal, alias — к каталогу объектов, disable_symlinks on, mount — read-only. Конфигурация и проверка: [deploy/nginx](../deploy/nginx/README.md), `python3 scripts/smoke_nginx.py` (требуется Docker).
 
-Публичный origin разрешается middleware для текущего запроса: явный download.public_base_url имеет приоритет, иначе проверенный Host и HTTPS от loopback TCP proxy. Forwarded/X-Forwarded-Host игнорируются. Домен не сохраняется в общем состоянии. Подробнее: [README](../README.md), [публикация и манифесты](release-management.md), [Tauri](integrations/tauri.md).
+Публичный origin разрешается middleware для текущего запроса: явный download.public_base_url имеет приоритет, иначе проверенный Host и HTTPS от loopback TCP proxy. По тем же правилам сервер формирует абсолютный `manifest_url` для ссылки и копирования на странице приложения. Forwarded/X-Forwarded-Host игнорируются. Домен не сохраняется в общем состоянии. Подробнее: [README](../README.md), [публикация и манифесты](release-management.md), [Tauri](integrations/tauri.md).
 
 ## Счётчики скачиваний
 

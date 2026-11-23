@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Alert, Avatar, Button, Card, Empty, List, Pagination, Result, Space, Spin, Tag, Typography } from 'antd';
-import { DownloadOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { Alert, App, Avatar, Button, Card, Empty, List, Pagination, Result, Space, Spin, Tag, Tooltip, Typography } from 'antd';
+import { CopyOutlined, DownloadOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom';
 import { api, ApiError, errorMessage } from '../api/client';
 import { artifactTypeName, size, targetName } from '../api/releases';
 import { PublicLayout } from '../components/PublicLayout';
 export interface PublicArtifact { id: string; filename: string; target: string; format: string; purpose: string; size_bytes: number; download_url: string }
 export interface PublicRelease { version: string; published_at: string; notes: string; artifacts: PublicArtifact[] }
-interface PublicApp { name: string; description: string; slug: string; icon_url: string | null; latest_by_target: Record<string, PublicRelease>; latest_by_type?: Record<string, Record<string, PublicRelease>> }
+interface PublicApp { name: string; description: string; slug: string; icon_url: string | null; manifest_url: string; latest_by_target: Record<string, PublicRelease>; latest_by_type?: Record<string, Record<string, PublicRelease>> }
 interface History { items: PublicRelease[]; total: number }
 const releaseDate = (s: string) => new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 function Files({ release }: { release: PublicRelease }) {
@@ -30,9 +30,14 @@ function Download({ app }: { app: PublicApp }) {
 }
 export default function PublicApplication() {
   const { slug = '' } = useParams();
+  const { message } = App.useApp();
   const [app, setApp] = useState<PublicApp>(); const [history, setHistory] = useState<History>(); const [page, setPage] = useState(1);
   const [error, setError] = useState(''); const [historyError, setHistoryError] = useState(''); const [missing, setMissing] = useState(false); const [attempt, setAttempt] = useState(0);
   const base = `/public/applications/${encodeURIComponent(slug)}`;
+  async function copyManifest(url: string) {
+    try { await navigator.clipboard.writeText(url); void message.success('Ссылка на манифест скопирована'); }
+    catch { void message.error('Не удалось скопировать. Скопируйте адрес через меню ссылки.'); }
+  }
   useEffect(() => {
     const c = new AbortController(); setApp(undefined); setError(''); setMissing(false); setPage(1);
     api<PublicApp>(base, 'GET', undefined, c.signal).then((v) => { if (!c.signal.aborted) setApp(v); }, (e) => { if (!c.signal.aborted) { setError(errorMessage(e)); setMissing(e instanceof ApiError && e.status === 404); } });
@@ -45,7 +50,9 @@ export default function PublicApplication() {
   }, [base, page, attempt]);
   return <PublicLayout>
     {error ? <Result status={missing ? '404' : 'error'} title={missing ? 'Приложение не найдено' : 'Не удалось загрузить приложение'} subTitle={missing ? 'Проверьте адрес приложения.' : error} extra={!missing && <Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !app ? <div className="catalog-loading"><Spin aria-label="Загрузка приложения" /></div> : <>
-      <section className="public-hero"><Avatar shape="square" size={88} src={app.icon_url} icon={<AppstoreOutlined />} /><div><Typography.Text className="eyebrow">РАСПРОСТРАНЕНИЕ ПРИЛОЖЕНИЙ</Typography.Text><Typography.Title level={1}>{app.name}</Typography.Title><Typography.Paragraph className="application-full-description">{app.description}</Typography.Paragraph></div></section>
+      <section className="public-hero"><Avatar shape="square" size={88} src={app.icon_url} icon={<AppstoreOutlined />} /><div><Typography.Text className="eyebrow">РАСПРОСТРАНЕНИЕ ПРИЛОЖЕНИЙ</Typography.Text><Typography.Title level={1}>{app.name}</Typography.Title><Typography.Paragraph className="application-full-description">{app.description}</Typography.Paragraph>
+        <Space size={4}><Typography.Link href={app.manifest_url}>Манифест JSON</Typography.Link><Tooltip title="Скопировать ссылку на манифест"><Button type="text" size="small" icon={<CopyOutlined />} aria-label="Скопировать ссылку на манифест" onClick={() => { void copyManifest(app.manifest_url); }} /></Tooltip></Space>
+      </div></section>
       <Download app={app} />
       <section><Typography.Title level={2}>История версий</Typography.Title>{historyError ? <Alert type="error" title="Не удалось загрузить историю" description={historyError} action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !history ? <Spin aria-label="Загрузка истории" /> : <><Space orientation="vertical" className="full-width">{history.items.length ? history.items.map((r) => <Card key={r.version} title={`Версия ${r.version}`} extra={<Typography.Text type="secondary">{releaseDate(r.published_at)}</Typography.Text>}><Typography.Paragraph className="application-full-description">{r.notes || 'Описание изменений не добавлено'}</Typography.Paragraph><Files release={r} /></Card>) : <Empty description="Опубликованных версий пока нет" />}</Space>{history.total > 10 && <Pagination current={page} pageSize={10} total={history.total} onChange={setPage} showSizeChanger={false} />}</>}</section>
     </>}

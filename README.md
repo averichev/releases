@@ -344,6 +344,8 @@ SQLite и файловая система не атомарны: использ�
 /api/v1/updates/tauri/{slug}/{target}/{arch}/{currentVersion}
 ```
 
+На публичной странице приложения под описанием доступны ссылка на JSON-манифест и кнопка-иконка копирования его полного URL. Адрес формируется сервером с учётом `download.public_base_url` либо origin текущего запроса.
+
 Манифест schema_version=2 содержит прежний installer latest_by_target, дополнительный latest_by_type (executable/installer/archive) и историю версий с SHA-256, размерами и URL. Пустая история допустима. Tauri выбирает последнюю совместимую подписанную updater-версию для платформы, сохраняя Universal и защиту от downgrade. Поля и примеры: [публичное API](docs/public-distribution.md), [публикация](docs/release-management.md), [Tauri](docs/integrations/tauri.md).
 
 Перед обновлением существующей базы выполните [проверку и явную политику миграции 0009](docs/migration-0009.md). Миграция сохраняет опубликованные релизы, подписи и файлы и останавливается при риске неявного расширения публичного доступа.

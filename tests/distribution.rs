@@ -1162,6 +1162,10 @@ async fn public_catalog_pagination_real_urls_and_all_privacy_boundaries() {
     )
     .await;
     assert!(empty["latest_by_target"].as_object().unwrap().is_empty());
+    assert_eq!(
+        empty["manifest_url"],
+        "https://apps.example.test/product/manifest.json"
+    );
     t.publish(&r).await;
     let catalog = json_body(
         t.get("GET", "/api/v1/public/applications/product", &[])
@@ -2073,6 +2077,7 @@ async fn automatic_domain_is_used_in_manifests_tauri_and_integration_without_sha
         let origin = format!("https://{host}");
         for path in [
             "/product/manifest.json".to_owned(),
+            "/api/v1/public/applications/product".to_owned(),
             "/api/v1/updates/tauri/product/windows/x86_64/0.1.0".to_owned(),
             format!("/api/v1/admin/applications/{}/integrations/tauri", t.app),
         ] {
@@ -2100,6 +2105,11 @@ async fn automatic_domain_is_used_in_manifests_tauri_and_integration_without_sha
                 assert_eq!(
                     value["releases"][0]["artifacts"][0]["download_url"],
                     format!("{origin}{}", t.url(&r, &a))
+                );
+            } else if path == "/api/v1/public/applications/product" {
+                assert_eq!(
+                    value["manifest_url"],
+                    format!("{origin}/product/manifest.json")
                 );
             } else if path.contains("/updates/tauri/") {
                 assert_eq!(value["url"], format!("{origin}{}", t.url(&r, &a)));

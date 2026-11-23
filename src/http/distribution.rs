@@ -229,8 +229,12 @@ async fn application(
         latest_by_type.insert(kind, documents);
     }
     state.distribution.recheck(&a.id).await?;
+    let manifest_url = format!(
+        "{}/{slug}/manifest.json",
+        state.distribution.config.public_base_url
+    );
     Ok(Json(
-        json!({"name":a.name,"description":a.description,"slug":a.slug,"icon_url":a.icon_key.as_ref().map(|_|format!("/api/v1/public/applications/{}/icon",a.slug)),"latest_by_target":latest_by_target,"latest_by_type":latest_by_type}),
+        json!({"name":a.name,"description":a.description,"slug":a.slug,"icon_url":a.icon_key.as_ref().map(|_|format!("/api/v1/public/applications/{}/icon",a.slug)),"manifest_url":manifest_url,"latest_by_target":latest_by_target,"latest_by_type":latest_by_type}),
     ))
 }
 async fn history(
