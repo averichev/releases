@@ -13,18 +13,21 @@ use std::{
     pin::Pin,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::{Context, Poll},
 };
 const HEADER_BUDGET: usize = 16 * 1024;
-pub(super) struct ParserBudget(Arc<AtomicUsize>);
+pub(super) struct ParserBudget(Arc<AtomicUsize>, Arc<AtomicBool>);
 impl ParserBudget {
     pub fn headers(&self) {
         self.0.store(HEADER_BUDGET, Ordering::Relaxed);
     }
     pub fn file(&self, max: usize) {
         self.0.store(max, Ordering::Relaxed);
+    }
+    pub fn exceeded(&self) -> bool {
+        self.1.load(Ordering::Relaxed)
     }
 }
 pub(super) async fn multipart(
@@ -42,18 +45,21 @@ pub(super) async fn multipart(
     }
     let (parts, body) = request.into_parts();
     let budget = Arc::new(AtomicUsize::new(HEADER_BUDGET));
+    let exceeded = Arc::new(AtomicBool::new(false));
     let input = Input {
         stream: body.into_data_stream(),
         pending: Bytes::new(),
         yield_next: false,
         budget: budget.clone(),
         failed: false,
+        remaining: max_request,
+        exceeded: exceeded.clone(),
     };
     let multipart =
         Multipart::from_request(Request::from_parts(parts, Body::from_stream(input)), &())
             .await
             .map_err(|_| ApiError::InvalidArtifact)?;
-    Ok((multipart, ParserBudget(budget)))
+    Ok((multipart, ParserBudget(budget, exceeded)))
 }
 struct Input {
     stream: BodyDataStream,
@@ -61,6 +67,8 @@ struct Input {
     yield_next: bool,
     budget: Arc<AtomicUsize>,
     failed: bool,
+    remaining: usize,
+    exceeded: Arc<AtomicBool>,
 }
 impl Stream for Input {
     type Item = Result<Bytes, Box<dyn Error + Send + Sync>>;
@@ -93,7 +101,16 @@ impl Stream for Input {
             )
             .into())));
         }
+        if this.pending.len() > this.remaining {
+            this.failed = true;
+            this.exceeded.store(true, Ordering::Relaxed);
+            return Poll::Ready(Some(Err(io::Error::other(
+                "Multipart request limit exceeded",
+            )
+            .into())));
+        }
         let count = this.pending.len().min(64 * 1024).min(allowed);
+        this.remaining -= count;
         this.budget.fetch_sub(count, Ordering::Relaxed);
         this.yield_next = true;
         Poll::Ready(Some(Ok(this.pending.split_to(count))))

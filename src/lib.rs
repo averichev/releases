@@ -62,6 +62,16 @@ pub async fn application_state(
         config.download.clone(),
     );
     Ok(http::AppState {
+        api_tokens: services::api_tokens::ApiTokens::new(
+            repositories::api_tokens::ApiTokensRepository::new(database.clone()),
+            repositories::applications::ApplicationsRepository::new(database.clone()),
+        ),
+        api_publishing: services::api_publishing::ApiPublishing::new(
+            releases.clone(),
+            storage.clone(),
+            validator.clone(),
+            config.storage.max_concurrent_uploads,
+        ),
         server_bind: config.server.bind,
         tauri_integration: services::tauri_integration::TauriIntegration::new(
             repositories::applications::ApplicationsRepository::new(database.clone()),

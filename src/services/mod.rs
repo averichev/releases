@@ -1,6 +1,8 @@
 //! Use-case orchestration. HTTP status codes and response DTOs do not belong here.
 pub mod health;
 
+pub mod api_publishing;
+pub mod api_tokens;
 pub mod applications;
 pub mod auth;
 pub mod error;

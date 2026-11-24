@@ -13,7 +13,7 @@ export default function PublicationHistory({ app }: { app: string }) {
   }, [app, cursor, attempt]);
   return <Card title="История публикаций">
     {error && <Alert type="error" title={error} showIcon action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} />}
-    <Table<PublicationEvent> rowKey="id" loading={busy} dataSource={events} pagination={false} scroll={{ x: 750 }} locale={{ emptyText: <Empty description="Публикаций пока нет" /> }} columns={[{ title: 'Дата', dataIndex: 'created_at', render: date }, { title: 'Пользователь', dataIndex: 'username' }, { title: 'Версия', dataIndex: 'version' }]} />
+    <Table<PublicationEvent> rowKey="id" loading={busy} dataSource={events} pagination={false} scroll={{ x: 750 }} locale={{ emptyText: <Empty description="Публикаций пока нет" /> }} columns={[{ title: 'Дата', dataIndex: 'created_at', render: date }, { title: 'Автор', key: 'author', render: (_, event) => event.author ?? event.username }, { title: 'Версия', dataIndex: 'version' }]} />
     {more && <Button disabled={busy} onClick={() => setCursor(events.at(-1)?.id)}>Загрузить ещё</Button>}
   </Card>;
 }

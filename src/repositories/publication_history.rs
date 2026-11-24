@@ -6,8 +6,10 @@ pub struct PublicationEvent {
     pub application_id: String,
     pub release_id: String,
     pub version: String,
-    pub user_id: String,
-    pub username: String,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub token_id: Option<String>,
+    pub token_name: Option<String>,
     pub created_at: i64,
 }
 #[derive(Clone)]
@@ -24,7 +26,7 @@ impl PublicationHistoryRepository {
         limit: u32,
         before: Option<i64>,
     ) -> Result<Vec<PublicationEvent>> {
-        Ok(sqlx::query_as("SELECT h.*,r.version,u.username FROM publication_history h JOIN releases r ON r.id=h.release_id JOIN users u ON u.id=h.user_id WHERE h.application_id=? AND (? IS NULL OR h.id<?) ORDER BY h.id DESC LIMIT ?")
+        Ok(sqlx::query_as("SELECT h.*,r.version,u.username,t.name AS token_name FROM publication_history h JOIN releases r ON r.id=h.release_id LEFT JOIN users u ON u.id=h.user_id LEFT JOIN api_tokens t ON t.id=h.token_id WHERE h.application_id=? AND (? IS NULL OR h.id<?) ORDER BY h.id DESC LIMIT ?")
             .bind(app).bind(before).bind(before).bind(limit).fetch_all(&self.pool).await?)
     }
     pub async fn append(
@@ -36,6 +38,17 @@ impl PublicationHistoryRepository {
     ) -> Result<()> {
         sqlx::query("INSERT INTO publication_history(application_id,release_id,user_id,created_at) VALUES(?,?,?,?)")
             .bind(app).bind(release).bind(user).bind(now).execute(c).await?;
+        Ok(())
+    }
+    pub async fn append_token(
+        c: &mut SqliteConnection,
+        app: &str,
+        release: &str,
+        token: &str,
+        now: i64,
+    ) -> Result<()> {
+        sqlx::query("INSERT INTO publication_history(application_id,release_id,token_id,created_at) VALUES(?,?,?,?)")
+            .bind(app).bind(release).bind(token).bind(now).execute(c).await?;
         Ok(())
     }
 }

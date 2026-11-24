@@ -107,19 +107,23 @@ async fn list(
             .collect(),
     ))
 }
-fn multipart_error(error: MultipartError) -> ApiError {
-    if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+fn multipart_error(error: MultipartError, budget: &super::upload_body::ParserBudget) -> ApiError {
+    if error.status() == StatusCode::PAYLOAD_TOO_LARGE || budget.exceeded() {
         ApiError::PayloadTooLarge
     } else {
         ApiError::InvalidArtifact
     }
 }
-async fn text(field: &mut Field<'_>, idle: Duration) -> Result<String, ApiError> {
+async fn text(
+    field: &mut Field<'_>,
+    idle: Duration,
+    budget: &super::upload_body::ParserBudget,
+) -> Result<String, ApiError> {
     let mut bytes = Vec::new();
     while let Some(chunk) = timeout(idle, field.chunk())
         .await
         .map_err(|_| ApiError::UploadTimeout)?
-        .map_err(multipart_error)?
+        .map_err(|e| multipart_error(e, budget))?
     {
         if bytes.len() + chunk.len() > 128 {
             return Err(ApiError::InvalidArtifact);
@@ -149,7 +153,7 @@ async fn upload(
     while let Some(mut field) = timeout(idle, multipart.next_field())
         .await
         .map_err(|_| ApiError::UploadTimeout)?
-        .map_err(multipart_error)?
+        .map_err(|e| multipart_error(e, &budget))?
     {
         // Parsing a header and consuming its field are separate bounded phases.
         budget.headers();
@@ -157,17 +161,17 @@ async fn upload(
             Some("target")
                 if upload.is_none() && target.is_none() && field.file_name().is_none() =>
             {
-                target = Some(text(&mut field, idle).await?)
+                target = Some(text(&mut field, idle, &budget).await?)
             }
             Some("file_type")
                 if upload.is_none() && file_type.is_none() && field.file_name().is_none() =>
             {
-                file_type = Some(text(&mut field, idle).await?)
+                file_type = Some(text(&mut field, idle, &budget).await?)
             }
             Some("distribution_role")
                 if upload.is_none() && role.is_none() && field.file_name().is_none() =>
             {
-                role = Some(text(&mut field, idle).await?);
+                role = Some(text(&mut field, idle, &budget).await?);
             }
             Some(name @ ("signature" | "standalone_signature"))
                 if (name == "signature" && signature.is_none())
@@ -191,7 +195,7 @@ async fn upload(
                 while let Some(chunk) = timeout(idle, field.chunk())
                     .await
                     .map_err(|_| ApiError::UploadTimeout)?
-                    .map_err(multipart_error)?
+                    .map_err(|e| multipart_error(e, &budget))?
                 {
                     let max = if standalone {
                         crate::domain::standalone::MAX_SIGNATURE_BYTES
@@ -232,7 +236,7 @@ async fn upload(
                 while let Some(chunk) = timeout(idle, field.chunk())
                     .await
                     .map_err(|_| ApiError::UploadTimeout)?
-                    .map_err(multipart_error)?
+                    .map_err(|e| multipart_error(e, &budget))?
                 {
                     pending.write(&chunk).await?;
                 }

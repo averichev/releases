@@ -1,5 +1,9 @@
 import { afterEach, vi } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
+
+// Ant Design rendering/accessibility scans can exceed the default 1s on a busy
+// CI host; keep async assertions inside the existing 30s per-test budget.
+configure({ asyncUtilTimeout: 5000 });
 
 Object.defineProperty(window, 'matchMedia', { writable: true, value: vi.fn().mockImplementation((query: string) => ({
   matches: false, media: query, onchange: null,

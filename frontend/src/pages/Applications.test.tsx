@@ -44,6 +44,7 @@ it('restores a nested application route and loads real releases', async () => {
 it('edits settings without submitting slug, then archives and restores', async () => {
   let stored = { ...app };
   const fetch = vi.fn((url: string, init?: RequestInit) => {
+    if (url.endsWith('/publication-tokens')) return Promise.resolve(response([]));
     if (url.endsWith('/auth/me')) return Promise.resolve(response(session));
     if (init?.method === 'PATCH') stored = { ...stored, ...JSON.parse(init.body as string) as Partial<typeof app> };
     if (url.endsWith('/archive')) stored = { ...stored, status: 'archived' };
@@ -88,7 +89,7 @@ it('sends search to the server and resets pagination', async () => {
 it('preserves a created application when its icon upload fails', async () => {
   vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:preview'; } static revokeObjectURL() {} });
   const fetch = vi.fn((url: string, init?: RequestInit) => Promise.resolve(url.endsWith('/auth/me') ? response(session)
-    : url.endsWith('/icon') ? response({ error: { code: 'invalid_icon' } }, 400) : response(app, init?.method === 'POST' ? 201 : 200)));
+    : url.endsWith('/publication-tokens') ? response([]) : url.endsWith('/icon') ? response({ error: { code: 'invalid_icon' } }, 400) : response(app, init?.method === 'POST' ? 201 : 200)));
   vi.stubGlobal('fetch', fetch); renderAt('/admin/applications/new');
   fireEvent.change(await screen.findByLabelText('Название'), { target: { value: app.name } });
   fireEvent.change(screen.getByLabelText('Файл иконки'), { target: { files: [new File(['bad'], 'icon.png', { type: 'image/png' })] } });
@@ -101,7 +102,7 @@ it('preserves a created application when its icon upload fails', async () => {
 it('uploads an SVG from application settings', async () => {
   vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:svg-preview'; } static revokeObjectURL() {} });
   const iconUrl = `/api/v1/admin/applications/${app.id}/icon?v=svg`;
-  const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : url.endsWith('/icon') ? { ...app, icon_url: iconUrl } : app)));
+  const fetch = vi.fn((url: string) => Promise.resolve(response(url.endsWith('/auth/me') ? session : url.endsWith('/publication-tokens') ? [] : url.endsWith('/icon') ? { ...app, icon_url: iconUrl } : app)));
   vi.stubGlobal('fetch', fetch); renderAt(`/admin/applications/${app.id}/settings`);
   const picker = await screen.findByLabelText('Файл иконки');
   expect(picker.getAttribute('accept')).toContain('image/svg+xml');

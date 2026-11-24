@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
+    #[error("At most two active publication tokens are allowed")]
+    ApiTokenLimit,
     #[error("Invalid standalone product identity, metadata, signature, key or platform")]
     InvalidStandalone,
     #[error("Standalone verification failed")]
@@ -72,6 +74,9 @@ pub enum ServiceError {
 impl From<sqlx::Error> for ServiceError {
     fn from(error: sqlx::Error) -> Self {
         if let sqlx::Error::Database(ref db) = error {
+            if db.message() == "api_token_limit" {
+                return Self::ApiTokenLimit;
+            }
             if db.message() == "release_locked" {
                 return Self::ReleaseLocked;
             }

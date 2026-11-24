@@ -31,6 +31,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
         .layer(middleware::from_fn(auth::require_admin));
     administrators
+        .merge(super::api_tokens::router())
         .merge(super::applications::router())
         .merge(super::releases::router())
         .merge(super::publication::router())

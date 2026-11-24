@@ -170,6 +170,14 @@ impl ApplicationsRepository {
         sqlx::query_as("SELECT tauri_public_key, EXISTS(SELECT 1 FROM releases WHERE application_id=applications.id AND status='published') FROM applications WHERE id=?")
             .bind(id).fetch_optional(&self.pool).await?.ok_or(ServiceError::NotFound)
     }
+    pub async fn tauri_key_in(c: &mut SqliteConnection, id: &str) -> Result<Option<String>> {
+        Ok(
+            sqlx::query_scalar("SELECT tauri_public_key FROM applications WHERE id=?")
+                .bind(id)
+                .fetch_one(c)
+                .await?,
+        )
+    }
     pub async fn set_tauri_key(
         c: &mut SqliteConnection,
         id: &str,

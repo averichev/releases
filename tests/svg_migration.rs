@@ -52,7 +52,7 @@ async fn svg_icon_migration_preserves_existing_icons_relations_and_identity_guar
         app
     );
     let after: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_schema WHERE type IN ('trigger','index') AND sql IS NOT NULL ORDER BY name").fetch_all(&pool).await.unwrap();
-    assert_eq!(after, guards);
+    assert!(guards.iter().all(|guard| after.contains(guard)));
     assert!(
         sqlx::query("PRAGMA foreign_key_check")
             .fetch_all(&pool)

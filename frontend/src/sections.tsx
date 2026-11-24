@@ -15,7 +15,7 @@ export const sections = [
   { path: 'users', title: 'Пользователи', icon: <TeamOutlined />,
     description: 'Участники команды и права доступа к управлению сервисом.' },
   { path: 'api-tokens', title: 'API-токены', icon: <KeyOutlined />,
-    description: 'Доступ автоматизированных систем к административному API.' },
+    description: 'Публикация из curl и CI: токены выдаются в настройках приложения.' },
   { path: 'downloads', title: 'Скачивания', icon: <LineChartOutlined />,
     description: 'События скачивания и статистика распространения.' },
 ];

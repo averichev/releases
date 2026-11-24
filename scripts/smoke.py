@@ -315,6 +315,49 @@ def main():
             # Adding generic files cannot replace the existing signed Tauri update.
             update, _ = call("/api/v1/updates/tauri/catalog-smoke/windows/x86_64/1.0.0", opener=build_opener())
             assert update["version"] == "2.0.0" and update["signature"] == signature.decode()
+
+            # Real curl publication, including a retry with independently generated
+            # multipart boundaries. Credentials enter curl only through stdin.
+            publication_token, token_headers = call(application_path + "/publication-tokens", "POST",
+                                                   {"name": "CI smoke"}, recovered["csrf_token"], 201)
+            assert token_headers["Cache-Control"] == "no-store"
+            secret_values.append(publication_token["token"])
+            cli_directory = root / "releases/4.0.0"
+            cli_directory.mkdir(parents=True)
+            cli_files = [("linux", "product-linux-x86_64", "linux-x86_64", "bin", b"cli linux executable"),
+                         ("windows", "product.exe", "windows-x86_64", "exe", b"cli windows executable")]
+            cli_manifest = {"version": "4.0.0", "notes": "## CLI release\n- Atomic publication.", "artifacts": []}
+            command = ["curl", "--silent", "--show-error", "--fail-with-body", "--header", "@-",
+                       "--write-out", "\n%{http_code}", "-F", "release=@publish.json;type=application/json"]
+            for name, filename, target, file_type, contents in cli_files:
+                (cli_directory / filename).write_bytes(contents)
+                cli_manifest["artifacts"].append({"file": name, "target": target, "distribution_role": "executable",
+                                                  "file_type": file_type, "sha256": hashlib.sha256(contents).hexdigest(),
+                                                  "size_bytes": len(contents)})
+                command.extend(["-F", f"{name}=@{filename}"])
+            (cli_directory / "publish.json").write_text(json.dumps(cli_manifest), encoding="utf-8")
+            command.append(base + "/api/v1/publish/catalog-smoke")
+            cli_results = []
+            for status in [201, 200]:
+                result = subprocess.run(command, input=f'Authorization: Bearer {publication_token["token"]}\n',
+                                        text=True, capture_output=True, cwd=cli_directory, timeout=30)
+                assert result.returncode == 0, (result.stderr, result.stdout)
+                body, actual_status = result.stdout.rsplit("\n", 1)
+                assert int(actual_status) == status, (actual_status, body)
+                cli_results.append(json.loads(body))
+            assert cli_results[0] == cli_results[1]
+            cli_history, _ = call(application_path + "/publication-history")
+            event = [row for row in cli_history if row["release_id"] == cli_results[0]["release_id"]]
+            assert len(event) == 1 and event[0]["author"] == "Токен CI smoke" and event[0]["user_id"] is None
+            for _, _, target, _, contents in cli_files:
+                downloaded, _ = call(f"/catalog-smoke/latest?target={target}&type=executable", opener=build_opener())
+                assert hashlib.sha256(downloaded).hexdigest() == hashlib.sha256(contents).hexdigest()
+            call(application_path + f'/publication-tokens/{publication_token["id"]}/revoke', "POST",
+                 csrf=recovered["csrf_token"], expected=204)
+            after_revoke, _ = call(application_path + "/publication-history")
+            assert after_revoke == cli_history
+            print("curl first (201): " + json.dumps(cli_results[0], ensure_ascii=False))
+            print("curl retry (200): " + json.dumps(cli_results[1], ensure_ascii=False))
             call(application_path, "PATCH", {"visibility": "private"}, recovered["csrf_token"])
             call("/catalog-smoke/manifest.json", opener=build_opener(), expected=404)
             call(application_path + "/manifests/preview")
@@ -334,7 +377,7 @@ def main():
             logs = log_path.read_text()
             assert "Veruna Releases stopped" in logs
             assert all(value not in logs for value in secret_values), "Secret leaked into logs"
-            print("Smoke passed: standalone assets, CLI recovery, sessions/CSRF, catalog, sanitized SVG icons, uploads/SHA-256, universal artifact types/extensionless binaries, publication/history, filtered/ambiguous latest, manifest v2, downloads/HEAD/Range, Tauri, immutability, nested routes, safe logs, WAL, migrations, SIGTERM.")
+            print("Smoke passed: standalone assets, CLI recovery, sessions/CSRF, catalog, sanitized SVG icons, uploads/SHA-256, universal artifact types/extensionless binaries, publication/history, curl batch publication/retry/token revocation, filtered/ambiguous latest, manifest v2, downloads/HEAD/Range, Tauri, immutability, nested routes, safe logs, WAL, migrations, SIGTERM.")
         finally:
             if process.poll() is None:
                 process.kill()

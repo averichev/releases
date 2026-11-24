@@ -1,4 +1,6 @@
 mod admin;
+mod api_publish;
+mod api_tokens;
 mod applications;
 mod artifacts;
 mod assets;
@@ -36,6 +38,8 @@ use error::ApiError;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub api_tokens: crate::services::api_tokens::ApiTokens,
+    pub api_publishing: crate::services::api_publishing::ApiPublishing,
     pub server_bind: std::net::SocketAddr,
     pub distribution: crate::services::distribution::PublicDistribution,
     pub publishing: crate::services::publishing::ReleasePublishing,
@@ -81,6 +85,7 @@ pub fn router(state: AppState) -> Router {
     let public = Router::new().route("/health", get(health::get));
     let v1 = public
         .nest("/auth", auth::router())
+        .merge(api_publish::router(&state))
         .merge(admin::router(state.clone()))
         .fallback(not_found);
     let api = Router::new()

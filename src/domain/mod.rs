@@ -1,4 +1,5 @@
 //! Domain invariants and types; independent of HTTP and persistence.
+pub mod api_token;
 pub mod application;
 pub mod user;
 

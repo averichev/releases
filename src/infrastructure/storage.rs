@@ -21,6 +21,10 @@ pub trait ArtifactStorage: Send + Sync {
     fn reconcile(&self, referenced: Vec<(String, i64)>) -> impl Future<Output = Result<()>> + Send;
     fn begin(&self) -> impl Future<Output = Result<PendingUpload>> + Send;
     fn promote(&self, upload: &mut PendingUpload) -> impl Future<Output = Result<()>> + Send;
+    fn duplicate(
+        &self,
+        upload: &PendingUpload,
+    ) -> impl Future<Output = Result<PendingUpload>> + Send;
     fn open(&self, key: &str, size: i64) -> impl Future<Output = Result<tokio::fs::File>> + Send;
     fn internal_uri(&self, key: &str) -> Result<String>;
     fn remove(&self, key: &str) -> impl Future<Output = Result<()>> + Send;
@@ -47,7 +51,7 @@ impl LocalArtifactStorage {
             temporary: config.temporary_directory(),
             icons: config.icons_directory.clone(),
             max_bytes: config.max_file_bytes,
-            workers: Arc::new(Semaphore::new(4)),
+            workers: Arc::new(Semaphore::new(config.max_concurrent_uploads)),
         }
     }
 }
@@ -84,13 +88,27 @@ impl Drop for Cleanup {
 pub struct PendingUpload {
     file: Option<tokio::fs::File>,
     cleanup: Cleanup,
-    _permit: OwnedSemaphorePermit,
+    _permit: Option<OwnedSemaphorePermit>,
+    promoted: bool,
     max_bytes: u64,
     hasher: Sha256,
     pub(crate) size_bytes: u64,
     pub(crate) key: String,
 }
 impl PendingUpload {
+    /// Flush each completed part and release its writer slot. A batch may retain
+    /// many sealed files while the service bounds concurrent requests separately.
+    pub async fn seal(&mut self) -> Result<()> {
+        if self.size_bytes == 0 {
+            return Err(ServiceError::InvalidArtifact);
+        }
+        if let Some(mut file) = self.file.take() {
+            file.flush().await.map_err(storage_error)?;
+            file.sync_all().await.map_err(storage_error)?;
+        }
+        self._permit = None;
+        Ok(())
+    }
     pub async fn write(&mut self, bytes: &[u8]) -> Result<()> {
         let size = self
             .size_bytes
@@ -215,7 +233,8 @@ impl ArtifactStorage for LocalArtifactStorage {
             Ok(PendingUpload {
                 file: Some(tokio::fs::File::from_std(file.into_std())),
                 cleanup,
-                _permit: permit,
+                _permit: Some(permit),
+                promoted: false,
                 max_bytes,
                 hasher: Sha256::new(),
                 size_bytes: 0,
@@ -225,16 +244,12 @@ impl ArtifactStorage for LocalArtifactStorage {
         .await
     }
     async fn promote(&self, upload: &mut PendingUpload) -> Result<()> {
-        if upload.size_bytes == 0 {
-            return Err(ServiceError::InvalidArtifact);
+        if upload.promoted {
+            return Err(ServiceError::Internal(anyhow::anyhow!(
+                "Upload already promoted"
+            )));
         }
-        let mut file = upload
-            .file
-            .take()
-            .ok_or_else(|| ServiceError::Internal(anyhow::anyhow!("Upload already promoted")))?;
-        file.flush().await.map_err(storage_error)?;
-        file.sync_all().await.map_err(storage_error)?;
-        drop(file);
+        upload.seal().await?;
         let temp = upload.cleanup.temporary.clone();
         let root = upload.cleanup.root.clone();
         let from = upload.cleanup.temporary_key.clone();
@@ -258,7 +273,44 @@ impl ArtifactStorage for LocalArtifactStorage {
         })
         .await?;
         upload.cleanup = cleanup;
+        upload.promoted = true;
         Ok(())
+    }
+    async fn duplicate(&self, upload: &PendingUpload) -> Result<PendingUpload> {
+        if upload.file.is_some() || upload.promoted {
+            return Err(ServiceError::Internal(anyhow::anyhow!(
+                "Duplicate requires a sealed temporary upload"
+            )));
+        }
+        let temp = upload.cleanup.temporary.clone();
+        let root = upload.cleanup.root.clone();
+        let from = upload.cleanup.temporary_key.clone();
+        let hasher = upload.hasher.clone();
+        let size_bytes = upload.size_bytes;
+        let max_bytes = upload.max_bytes;
+        // Independent immutable objects keep storage_key UNIQUE. Hard links avoid
+        // sending, hashing or copying the same Windows package a second time.
+        blocking(move || {
+            let id = uuid::Uuid::new_v4().simple().to_string();
+            let temporary_key = format!("{id}.tmp");
+            temp.hard_link(from, &temp, &temporary_key)?;
+            Ok(PendingUpload {
+                file: None,
+                cleanup: Cleanup {
+                    temporary: temp,
+                    root,
+                    temporary_key,
+                    permanent_key: None,
+                },
+                _permit: None,
+                promoted: false,
+                max_bytes,
+                hasher,
+                size_bytes,
+                key: format!("{id}.blob"),
+            })
+        })
+        .await
     }
     async fn open(&self, key: &str, size: i64) -> Result<tokio::fs::File> {
         let directory = self.directory.clone();

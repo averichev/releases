@@ -6,6 +6,7 @@ use axum::{
 use serde::Serialize;
 
 pub enum ApiError {
+    ApiTokenLimit,
     InvalidStandalone,
     StandaloneVerification(crate::domain::standalone::VerificationError),
     StandaloneKeyConflict,
@@ -58,6 +59,11 @@ struct ErrorBody {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::ApiTokenLimit => (
+                StatusCode::CONFLICT,
+                "api_token_limit",
+                "At most two active publication tokens are allowed; revoke an existing token",
+            ),
             Self::StandaloneVerification(error) => {
                 return (
                     StatusCode::UNPROCESSABLE_ENTITY,

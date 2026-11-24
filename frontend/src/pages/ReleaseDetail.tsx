@@ -10,6 +10,7 @@ import ArtifactUploader from './ArtifactUploader';
 import ReleasePublication from './ReleasePublication';
 import ArtifactUpdater from './ArtifactUpdater';
 import DownloadCount from '../components/DownloadCount';
+import ReleaseNotes from '../components/ReleaseNotes';
 interface Detail { application: Application; release: Release; artifacts: Artifact[]; options: UploadOptions }
 export default function ReleaseDetail() {
   const { id = '', releaseId = '' } = useParams(); const { state } = useAuth(); const { modal, message } = App.useApp(); const navigate = useNavigate();
@@ -58,7 +59,7 @@ export default function ReleaseDetail() {
     <div className="release-heading"><div className="page-heading"><Typography.Title level={1}>{release.version}</Typography.Title><Typography.Paragraph>{release.title || application.name}</Typography.Paragraph></div><Tag color={release.status === 'published' ? 'green' : undefined}>{release.status === 'published' ? 'Published' : 'Draft'}</Tag></div>
     {error && <Alert className="form-alert" type="error" title={error} showIcon />}
     <Card className="release-info" title="Информация о релизе" extra={editable && <Button disabled={busy || uploadBusy} onClick={() => { setError(''); setEditing(true); }}>Изменить релиз</Button>}>
-      <Typography.Paragraph className="application-full-description">{release.release_notes || 'Описание изменений не добавлено'}</Typography.Paragraph>
+      <ReleaseNotes>{release.release_notes || 'Описание изменений не добавлено'}</ReleaseNotes>
       <Descriptions column={{ xs: 1, md: 2 }} size="small" items={[{ key: 'created', label: 'Создан', children: date(release.created_at) }, { key: 'updated', label: 'Изменён', children: date(release.updated_at) }, { key: 'files', label: 'Файлы', children: release.artifact_count }, { key: 'size', label: 'Общий размер', children: size(release.total_size_bytes) }, { key: 'downloads', label: 'Скачивания', children: <DownloadCount count={release.download_count} /> }, ...(release.status === 'published' ? [{ key: 'published', label: 'Опубликован', children: date(release.published_at!) }] : [])]} />
     </Card>
     {editable && <ReleasePublication app={id} release={release} disabled={busy || uploadBusy} onChange={refresh} />}

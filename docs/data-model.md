@@ -30,9 +30,15 @@ UNIQUE(release_id,target,file_type,distribution_role). Частичный UNIQUE
 
 ## publication_history
 
-Монотонный INTEGER id; application_id; release_id UNIQUE; user_id; created_at. Составной FK(release_id,application_id) ссылается на релиз того же приложения; пользователь защищён FK RESTRICT. Индекс(application_id,id DESC) обслуживает cursor before. UPDATE/DELETE запрещены. Факт первой публикации записывается атомарно со статусом релиза; дополнение файлами не создаёт новую публикацию.
+Монотонный INTEGER id; application_id; release_id UNIQUE; nullable user_id/token_id; created_at. CHECK требует ровно одного автора. Составные FK(release_id,application_id) и FK(token_id,application_id) ссылаются на релиз и токен того же приложения; авторы защищены FK RESTRICT. Индекс(application_id,id DESC) обслуживает cursor before. UPDATE/DELETE запрещены. Факт первой публикации записывается атомарно со статусом релиза; дополнение файлами не создаёт новую публикацию. Миграция 0016 сохраняет все прежние user_id, ID событий и даты.
 
-ApiToken и DownloadEvent не создаются. URL и JSON не сохраняются в БД. Каталог опубликованных версий читается в одном snapshot и сортируется по SemVer. Выбор установщиков выполняется отдельно для target/формата, подписанных updater — отдельно по совместимости. Limit истории не ограничивает поиск актуальных платформ.
+DownloadEvent не создаётся. Публичные URL не сохраняются в БД. Каталог опубликованных версий читается в одном snapshot и сортируется по SemVer. Выбор установщиков выполняется отдельно для target/формата, подписанных updater — отдельно по совместимости. Limit истории не ограничивает поиск актуальных платформ.
+
+## api_tokens и api_publications
+
+Миграция 0016 добавляет ApiToken: UUID, application_id, индексируемый UNIQUE token_hash (SHA-256 всего секрета с префиксом), name, created_at/created_by, nullable expires_at и пару revoked_at/revoked_by. Идентичность и параметры выдачи неизменяемы; отзыв однократный, удаление запрещено. Триггер ограничивает число действующих токенов приложения двумя, включая конкурентную выдачу. В списке нет hash или секрета. Генерация использует системные 32 случайных байта из infrastructure/secrets.
+
+`api_publications(release_id PRIMARY KEY, manifest TEXT)` хранит нормализованный исходный JSON только для выпусков нового endpoint: полную версию, notes и отсортированные описания фактических файлов/принятых подписей. Не содержит токена, transport part names, boundary, URL и путей. INSERT разрешён только для published; UPDATE/DELETE запрещены. Manifest создаётся в одной транзакции с релизом и событием. Уникальность версии остаётся прежней `(application_id,version_key)`; ручные версии не получают API manifest и всегда конфликтуют с CLI-публикацией.
 
 ## artifact_download_counts
 

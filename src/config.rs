@@ -70,6 +70,7 @@ pub struct StorageConfig {
     pub max_file_bytes: u64,
     pub max_request_bytes: usize,
     pub upload_idle_seconds: u64,
+    pub max_concurrent_uploads: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,6 +133,7 @@ impl Default for StorageConfig {
             max_file_bytes: 2 * 1024 * 1024 * 1024,
             max_request_bytes: 2 * 1024 * 1024 * 1024 + 1024 * 1024,
             upload_idle_seconds: 120,
+            max_concurrent_uploads: 4,
         }
     }
 }
@@ -201,6 +203,10 @@ impl AppConfig {
         ensure!(
             (1..=86400).contains(&self.storage.upload_idle_seconds),
             "storage.upload_idle_seconds must be between 1 and 86400"
+        );
+        ensure!(
+            (1..=64).contains(&self.storage.max_concurrent_uploads),
+            "storage.max_concurrent_uploads must be between 1 and 64"
         );
         ensure!(
             self.storage

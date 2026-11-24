@@ -12,6 +12,7 @@ import TauriIntegration from './TauriIntegration';
 import PublicationHistory from './PublicationHistory';
 import ApplicationForm, { ApplicationIcon, ApplicationTags, IconPicker } from './ApplicationForm';
 import StandaloneSettings from './StandaloneSettings';
+import PublicationTokens from './PublicationTokens';
 
 function Settings({ application, onChange, iconError }: { application: Application; onChange: (app: Application) => void; iconError?: string }) {
   const { modal, message } = App.useApp(); const [busy, setBusy] = useState(false); const [error, setError] = useState(iconError ?? ''); const [file, setFile] = useState<File | null>(null);
@@ -40,6 +41,7 @@ function Settings({ application, onChange, iconError }: { application: Applicati
   return <div className="application-settings">
     {error && <Alert className="form-alert" type="error" title={error} showIcon />}
     <Card title="Основные настройки"><ApplicationForm application={application} busy={busy} onSubmit={(values) => { void update(values); }} submitText="Сохранить изменения" /></Card>
+    <PublicationTokens applicationId={application.id} archived={application.status === 'archived'} />
     <div id="signed-updates" ref={signedUpdates}><StandaloneSettings applicationId={application.id} /></div>
     <Card title="Иконка"><Space className="current-icon"><ApplicationIcon application={application} size={64} /><Typography.Text type="secondary">{application.icon_url ? 'Текущая иконка' : 'Стандартная иконка'}</Typography.Text></Space>
       <IconPicker file={file} onChange={setFile} disabled={busy} /><Space wrap><Button type="primary" disabled={!file} loading={busy} onClick={() => { void changeIcon(); }}>Загрузить иконку</Button>

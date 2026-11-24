@@ -2,7 +2,7 @@ import { ApiError } from './client';
 export interface Issue { code: string; artifact_id: string | null; message: string }
 export interface Validation { state: 'ready' | 'warnings' | 'errors'; warnings: Issue[]; errors: Issue[] }
 export interface PublicationCheck { release_revision: number; validation: Validation }
-export interface PublicationEvent { id: number; version: string; username: string; created_at: number }
+export interface PublicationEvent { id: number; version: string; username: string | null; author?: string; token_id?: string | null; created_at: number }
 export interface TauriResponse { version: string; pub_date: string; url: string; signature: string; notes: string }
 export interface TauriPreview { state: string; reason: string; message: string; selected_version: string | null; artifact_id: string | null; artifact_filename?: string | null; signature_present: boolean; public_downloads_available: boolean; response: TauriResponse | null }
 export function serverValidation(error: unknown): Validation | undefined {

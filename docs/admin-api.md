@@ -125,3 +125,7 @@ TauriPreview: state,reason,message,selected_version,artifact_id,artifact_filenam
 ## Настройка Tauri-интеграции
 
 Описание GET/PUT `/applications/{id}/integrations/tauri`, явного POST `/readiness`, полей, прав и примеров: [Tauri — административный API](integrations/tauri.md#статусы-и-административный-api). Префикс `/api/v1/admin` и session/CSRF сохраняются. Оператор может читать настройки и вызывать read-only preview; изменение публичного ключа требует admin с повторной проверкой сессии в транзакции. Публичные ключи не секретны; приватные ключи и пароли не принимаются.
+
+## Публикация из CLI
+
+Управление токенами приложения, Bearer endpoint и ответы истории с авторами описаны в [CLI publication](cli-publication.md). Admin endpoints для токенов требуют admin-session, Origin/custom header/CSRF и повторной авторизации в транзакции. Публичный POST публикации принимает только Bearer; он не открывает административные сценарии.

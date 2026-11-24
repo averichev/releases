@@ -73,6 +73,21 @@ fn request_origin(request: &Request, fallback: SocketAddr) -> Result<String, Api
     Ok(url.origin().ascii_serialization())
 }
 
+/// Bearer credentials require an actual trusted TLS hop, regardless of explicit
+/// URL settings. Plain HTTP is only a local development connection.
+pub(super) fn publication_transport(request: &Request, state: &AppState) -> Result<(), ApiError> {
+    let origin = request_origin(request, state.server_bind)?;
+    let local_peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .is_none_or(|ConnectInfo(peer)| peer.ip().is_loopback());
+    if origin.starts_with("https://") || (local_peer && state.server_bind.ip().is_loopback()) {
+        Ok(())
+    } else {
+        Err(ApiError::Forbidden)
+    }
+}
+
 pub async fn resolve(
     State(mut state): State<AppState>,
     mut request: Request,

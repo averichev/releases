@@ -72,6 +72,8 @@ fn invalid_or_misspelled_settings_fail_early() {
         ("DOWNLOAD__PUBLIC_BASE_URL", "https://apps.example.test?x=1"),
         ("DOWNLOAD__DELIVERY_MODE", "invalid"),
         ("DOWNLOAD__MAX_CONCURRENT_DOWNLOADS", "0"),
+        ("STORAGE__MAX_CONCURRENT_UPLOADS", "0"),
+        ("STORAGE__MAX_CONCURRENT_UPLOADS", "65"),
         ("SERVER__SHUTDOWN_TIMEOUT_SECONDS", "0"),
         ("DATABASE__MAX_CONNECTIONS", "0"),
         ("DATABASE__BUSY_TIMEOUT_SECONDS", "0"),

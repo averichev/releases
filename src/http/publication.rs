@@ -118,7 +118,12 @@ async fn history(
         .publishing
         .history(&app, q.limit.unwrap_or(50), q.before)
         .await?;
-    Ok(Json(Value::Array(rows.into_iter().map(|h|json!({"id":h.id,"application_id":h.application_id,"release_id":h.release_id,"version":h.version,"user_id":h.user_id,"username":h.username,"created_at":h.created_at})).collect())))
+    Ok(Json(Value::Array(rows.into_iter().map(|h| {
+        let author = h.token_name.as_ref().map(|name|format!("Токен {name}")).or_else(||h.username.clone());
+        json!({"id":h.id,"application_id":h.application_id,"release_id":h.release_id,"version":h.version,
+            "user_id":h.user_id,"username":h.username,"token_id":h.token_id,"token_name":h.token_name,
+            "author":author,"created_at":h.created_at})
+    }).collect())))
 }
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]

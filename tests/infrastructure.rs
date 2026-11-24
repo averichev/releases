@@ -40,6 +40,8 @@ async fn creates_configured_paths_and_applies_baseline_once() {
         tables,
         vec![
             "_sqlx_migrations",
+            "api_publications",
+            "api_tokens",
             "applications",
             "artifact_download_counts",
             "artifacts",

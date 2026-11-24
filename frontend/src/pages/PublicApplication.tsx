@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 import { api, ApiError, errorMessage } from '../api/client';
 import { artifactTypeName, size, targetName } from '../api/releases';
 import { PublicLayout } from '../components/PublicLayout';
+import ReleaseNotes from '../components/ReleaseNotes';
 export interface PublicArtifact { id: string; filename: string; target: string; format: string; purpose: string; size_bytes: number; download_url: string }
 export interface PublicRelease { version: string; published_at: string; notes: string; artifacts: PublicArtifact[] }
 interface PublicApp { name: string; description: string; slug: string; icon_url: string | null; manifest_url: string; latest_by_target: Record<string, PublicRelease>; latest_by_type?: Record<string, Record<string, PublicRelease>> }
@@ -24,7 +25,7 @@ function Download({ app }: { app: PublicApp }) {
         <Typography.Text>{a.filename} · {size(a.size_bytes)}</Typography.Text>
         <Typography.Text copyable={{text: a.download_url}}>Ссылка</Typography.Text>
       </Space>)}</Space>
-      {release.notes && <Typography.Paragraph className="application-full-description">{release.notes}</Typography.Paragraph>}
+      {release.notes && <ReleaseNotes>{release.notes}</ReleaseNotes>}
     </Card>)}
   </Space></section>;
 }
@@ -54,7 +55,7 @@ export default function PublicApplication() {
         <Space size={4}><Typography.Link href={app.manifest_url}>Манифест JSON</Typography.Link><Tooltip title="Скопировать ссылку на манифест"><Button type="text" size="small" icon={<CopyOutlined />} aria-label="Скопировать ссылку на манифест" onClick={() => { void copyManifest(app.manifest_url); }} /></Tooltip></Space>
       </div></section>
       <Download app={app} />
-      <section><Typography.Title level={2}>История версий</Typography.Title>{historyError ? <Alert type="error" title="Не удалось загрузить историю" description={historyError} action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !history ? <Spin aria-label="Загрузка истории" /> : <><Space orientation="vertical" className="full-width">{history.items.length ? history.items.map((r) => <Card key={r.version} title={`Версия ${r.version}`} extra={<Typography.Text type="secondary">{releaseDate(r.published_at)}</Typography.Text>}><Typography.Paragraph className="application-full-description">{r.notes || 'Описание изменений не добавлено'}</Typography.Paragraph><Files release={r} /></Card>) : <Empty description="Опубликованных версий пока нет" />}</Space>{history.total > 10 && <Pagination current={page} pageSize={10} total={history.total} onChange={setPage} showSizeChanger={false} />}</>}</section>
+      <section><Typography.Title level={2}>История версий</Typography.Title>{historyError ? <Alert type="error" title="Не удалось загрузить историю" description={historyError} action={<Button onClick={() => setAttempt((v) => v + 1)}>Повторить</Button>} /> : !history ? <Spin aria-label="Загрузка истории" /> : <><Space orientation="vertical" className="full-width">{history.items.length ? history.items.map((r) => <Card key={r.version} title={`Версия ${r.version}`} extra={<Typography.Text type="secondary">{releaseDate(r.published_at)}</Typography.Text>}><ReleaseNotes>{r.notes || 'Описание изменений не добавлено'}</ReleaseNotes><Files release={r} /></Card>) : <Empty description="Опубликованных версий пока нет" />}</Space>{history.total > 10 && <Pagination current={page} pageSize={10} total={history.total} onChange={setPage} showSizeChanger={false} />}</>}</section>
     </>}
   </PublicLayout>;
 }

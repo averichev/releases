@@ -118,7 +118,11 @@ a { color: #236b54; }
 .application-detail-heading { display: flex; align-items: center; gap: 20px; margin-bottom: 22px; }
 .application-detail-heading .page-heading { min-width: 0; overflow-wrap: anywhere; }
 .application-full-description { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 900px; }
-.application-settings { display: grid; gap: 24px; max-width: 850px; }
+.release-notes { overflow-wrap: anywhere; margin-bottom: 16px; }
+.release-notes pre { max-width: 100%; overflow-x: auto; padding: 12px; background: var(--ant-color-fill-quaternary, #f7f9f8); border-radius: 6px; }
+.release-notes > :last-child { margin-bottom: 0; }
+.application-settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; max-width: 850px; }
+.application-settings > * { min-width: 0; }
 .current-icon { margin-bottom: 22px; }
 .archive-notice { margin-top: 22px; }
 @media (max-width: 1250px) { .catalog-toolbar { grid-template-columns: 1fr 1fr; } .application-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -7,6 +7,7 @@ export interface IssuedLink { activation_url: string; expires_at: number }
 let csrfToken: string | undefined;
 export function setCsrf(value?: string) { csrfToken = value; }
 const messages: Record<string, string> = {
+  api_token_limit: 'У приложения уже два действующих токена. Отзовите один перед выдачей нового.',
   invalid_standalone: 'Проверьте подпись .jws, UUID продукта, публичный ключ, версию и платформу файла. Подпись должна соответствовать этому исполняемому файлу.',
   standalone_product_conflict: 'UUID продукта уже используется другим приложением или закреплён первой подписанной загрузкой. Обновите настройки и используйте исходный UUID продукта.',
   standalone_key_conflict: 'Публичный ключ уже используется другим приложением или закреплён существующими подписанными файлами. Обновите настройки и используйте ключ издателя этого приложения.',

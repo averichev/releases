@@ -276,6 +276,7 @@ async fn activate(
 impl From<ServiceError> for ApiError {
     fn from(error: ServiceError) -> Self {
         match error {
+            ServiceError::ApiTokenLimit => Self::ApiTokenLimit,
             ServiceError::InvalidStandalone => Self::InvalidStandalone,
             ServiceError::StandaloneVerification(
                 crate::domain::standalone::VerificationError::OwnershipMismatch,

@@ -60,11 +60,12 @@ function AdminLayout() {
 }
 
 function Placeholder({ title, description }: { title: string; description: string }) {
-  const withinApplication = title === 'Релизы' || title === 'Дистрибутивы';
+  const publicationTokens = title === 'API-токены';
+  const withinApplication = title === 'Релизы' || title === 'Дистрибутивы' || publicationTokens;
   return <>
     <div className="page-heading"><div className="eyebrow">ПАНЕЛЬ УПРАВЛЕНИЯ</div><Title level={1}>{title}</Title><Paragraph>{description}</Paragraph></div>
     <Card><Result icon={<SafetyCertificateOutlined />} title={withinApplication ? "Выберите приложение" : "Раздел запланирован"}
-      subTitle={withinApplication ? "Откройте приложение → Релизы для управления версиями и файлами." : "Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."}
+      subTitle={publicationTokens ? "Администратор управляет токенами в Приложение → Настройки → Публикация из CLI. Каждый токен публикует новые выпуски только своего приложения." : withinApplication ? "Откройте приложение → Релизы для управления версиями и файлами." : "Функциональность появится на следующих этапах. Данные пока не создаются и не обрабатываются."}
       extra={<Link to={withinApplication ? "/admin/applications" : "/admin"}><Button>{withinApplication ? "Открыть приложения" : "Вернуться к обзору"}</Button></Link>} /></Card>
   </>;
 }
