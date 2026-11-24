@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import ArtifactUploader from './ArtifactUploader';
 import type { Artifact } from '../api/releases';
 
 const options = { targets: ['windows-x86_64', 'linux-x86_64', 'linux-aarch64', 'darwin-aarch64', 'darwin-universal', 'any'], file_types: ['exe', 'bin', 'x86_64', 'tar.gz'], max_file_bytes: 1024, upload_idle_seconds: 120 };
 const existing = { download_count: 0, id: 'installer', release_id: 'release', filename: 'installer.exe', target: 'windows-x86_64', file_type: 'exe', distribution_role: 'installer' as const, signature_present: false, size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1 };
+const configured = {application_id: 'app', product_id: '00000000-0000-4000-8000-000000000001', public_key: '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo', key_id: 'key-id', product_id_locked: false, public_key_locked: false};
+beforeEach(() => vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify(configured))))));
 async function select(name: string, label: string) {
-  fireEvent.mouseDown(screen.getByRole('combobox', {name}));
+  fireEvent.mouseDown(await screen.findByRole('combobox', {name}));
   fireEvent.click(await screen.findByText(label, {selector: '.ant-select-item-option-content'}));
 }
 async function choose(kind: string, os = 'Windows', target = os === 'Linux' ? 'linux-x86_64' : 'windows-x86_64') {
@@ -28,7 +31,7 @@ function acceptedUpload() {
 }
 function renderUploader(artifacts: Artifact[] = [existing], published = false) {
   const onChange = vi.fn(); const onBusy = vi.fn();
-  render(<ArtifactUploader applicationId="app" releaseId="release" artifacts={artifacts} options={options} published={published} onChange={onChange} onBusy={onBusy} />);
+  render(<MemoryRouter><ArtifactUploader applicationId="app" releaseId="release" artifacts={artifacts} options={options} published={published} onChange={onChange} onBusy={onBusy} /></MemoryRouter>);
   return {onChange, onBusy};
 }
 
@@ -174,6 +177,56 @@ it('requires standalone JWS and resets architecture and files when OS changes', 
   await screen.findByText('Файл загружен и сохранён.');
   expect(sent()?.get('target')).toBe('windows-x86_64'); expect(sent()?.get('distribution_role')).toBe('executable');
   expect((sent()?.get('standalone_signature') as File).name).toBe('program.jws'); expect(sent()?.has('signature')).toBe(false);
+});
+
+it.each([
+  [{...configured, product_id: null, public_key: null}, 'Не заданы UUID продукта и публичный ключ.'],
+  [{...configured, product_id: null}, 'Не задан UUID продукта.'],
+  [{...configured, public_key: null}, 'Не задан публичный ключ.'],
+])('checks standalone settings before offering files: %j', async (settings, message) => {
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify(settings)))));
+  const sent = acceptedUpload(); renderUploader([]);
+  await select('Тип артефакта', 'Пакет обновления');
+  expect(await screen.findByText(new RegExp(message))).toBeDefined();
+  expect(screen.getByRole('link', {name: 'Настроить подписанные обновления'}).getAttribute('href')).toBe('/admin/applications/app/settings#signed-updates');
+  expect(document.querySelector('input[type="file"]')).toBeNull();
+  expect(screen.queryByRole('button', {name: 'Загрузить файл'})).toBeNull();
+  expect(sent()).toBeUndefined();
+});
+
+it('blocks standalone uploads while checking settings and recovers after retry', async () => {
+  let resolve!: (response: Response) => void;
+  const fetch = vi.fn(() => new Promise<Response>((done) => { resolve = done; })); vi.stubGlobal('fetch', fetch);
+  renderUploader([]); await select('Тип артефакта', 'Пакет обновления');
+  expect(screen.getByRole('status').textContent).toMatch(/Проверяем настройки/);
+  expect(document.querySelector('input[type="file"]')).toBeNull();
+  resolve(new Response(JSON.stringify({error: {code: 'internal_error'}}), {status: 500}));
+  await screen.findByText('Не удалось проверить настройки подписанных обновлений');
+  expect(document.querySelector('input[type="file"]')).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: 'Повторить проверку'}));
+  resolve(new Response(JSON.stringify(configured)));
+  expect(await screen.findByRole('combobox', {name: 'Операционная система'})).toBeDefined();
+});
+
+it('rechecks settings before sending file bytes if another administrator cleared the key', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(configured)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({...configured, public_key: null})));
+  vi.stubGlobal('fetch', fetch); const sent = acceptedUpload(); const {onChange, onBusy} = renderUploader([]);
+  await choose('Пакет обновления', 'Linux'); chooseFile('program-0.7.2-linux-x86_64');
+  fireEvent.change(screen.getByLabelText('Подпись издателя (.jws)'), {target: {files: [new File(['signature'], 'program.jws')]}});
+  fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
+  await screen.findByText(/Не задан публичный ключ/);
+  expect(sent()).toBeUndefined(); expect(onChange).not.toHaveBeenCalled();
+  await waitFor(() => expect(onBusy).toHaveBeenLastCalledWith(false));
+});
+
+it('does not require standalone settings for an ordinary executable', async () => {
+  const fetch = vi.fn().mockRejectedValue(new Error('offline')); vi.stubGlobal('fetch', fetch);
+  const sent = acceptedUpload(); renderUploader([]);
+  await choose('Исполняемый файл', 'Linux'); chooseFile('program');
+  fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
+  await screen.findByText('Файл загружен и сохранён.');
+  expect(sent()?.get('distribution_role')).toBe('executable'); expect(fetch).not.toHaveBeenCalled();
 });
 
 it('clears files when the workflow changes and rejects invalid standalone signature files', async () => {

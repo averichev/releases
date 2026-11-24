@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Result, Space, Spin, Tabs, Typography } from 'antd';
 import DownloadCount from '../components/DownloadCount';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -11,9 +11,12 @@ import Manifests from './Manifests';
 import TauriIntegration from './TauriIntegration';
 import PublicationHistory from './PublicationHistory';
 import ApplicationForm, { ApplicationIcon, ApplicationTags, IconPicker } from './ApplicationForm';
+import StandaloneSettings from './StandaloneSettings';
 
 function Settings({ application, onChange, iconError }: { application: Application; onChange: (app: Application) => void; iconError?: string }) {
   const { modal, message } = App.useApp(); const [busy, setBusy] = useState(false); const [error, setError] = useState(iconError ?? ''); const [file, setFile] = useState<File | null>(null);
+  const signedUpdates = useRef<HTMLDivElement>(null); const { hash } = useLocation();
+  useEffect(() => { if (hash === '#signed-updates') signedUpdates.current?.scrollIntoView({block: 'start'}); }, [hash]);
   async function changeIcon(remove = false) {
     if (!file && !remove) return;
     setBusy(true); setError('');
@@ -37,6 +40,7 @@ function Settings({ application, onChange, iconError }: { application: Applicati
   return <div className="application-settings">
     {error && <Alert className="form-alert" type="error" title={error} showIcon />}
     <Card title="Основные настройки"><ApplicationForm application={application} busy={busy} onSubmit={(values) => { void update(values); }} submitText="Сохранить изменения" /></Card>
+    <div id="signed-updates" ref={signedUpdates}><StandaloneSettings applicationId={application.id} /></div>
     <Card title="Иконка"><Space className="current-icon"><ApplicationIcon application={application} size={64} /><Typography.Text type="secondary">{application.icon_url ? 'Текущая иконка' : 'Стандартная иконка'}</Typography.Text></Space>
       <IconPicker file={file} onChange={setFile} disabled={busy} /><Space wrap><Button type="primary" disabled={!file} loading={busy} onClick={() => { void changeIcon(); }}>Загрузить иконку</Button>
         {application.icon_url && <Button danger disabled={busy} onClick={() => modal.confirm({ title: 'Удалить иконку?', content: 'Будет показана стандартная иконка приложения.', okText: 'Удалить', cancelText: 'Отмена', onOk: () => changeIcon(true) })}>Удалить иконку</Button>}

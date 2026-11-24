@@ -64,6 +64,18 @@ impl ApplicationsRepository {
             .ok_or(ServiceError::NotFound)?;
         row.application()
     }
+    pub async fn standalone_settings(&self, id: &str) -> Result<(Application, bool)> {
+        let mut tx = self.pool.begin().await?;
+        let app = Self::get_in(&mut tx, id).await?;
+        let key_locked = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM artifacts a JOIN releases r ON r.id=a.release_id WHERE r.application_id=? AND a.standalone_signature IS NOT NULL)",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok((app, key_locked))
+    }
     pub async fn by_slug_in(c: &mut SqliteConnection, slug: &str) -> Result<Application> {
         sqlx::query_as::<_, StoredApplication>(&format!("{SELECT} WHERE slug=?"))
             .bind(slug)

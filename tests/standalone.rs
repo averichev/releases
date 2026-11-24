@@ -868,6 +868,8 @@ async fn identity_settings_distinguish_missing_null_and_value_and_roll_back_toge
     assert_eq!(initial["application_id"], t.app);
     assert!(initial["product_id"].is_null());
     assert!(initial["public_key"].is_null());
+    assert_eq!(initial["product_id_locked"], false);
+    assert_eq!(initial["public_key_locked"], false);
     for invalid in [
         "",
         "bad",
@@ -1019,6 +1021,51 @@ async fn identity_settings_distinguish_missing_null_and_value_and_roll_back_toge
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn standalone_settings_report_product_and_key_locks_from_the_same_snapshot() {
+    let t = TestApp::new().await;
+    let settings = format!("{}/integrations/standalone", t.base());
+    let read = || t.admin("GET", &settings, Value::Null, Some(&t.token), true);
+    assert_eq!(
+        t.admin("GET", &settings, Value::Null, None, true)
+            .await
+            .status(),
+        401
+    );
+    let initial = body(read().await).await;
+    assert_eq!(initial["product_id_locked"], false);
+    assert_eq!(initial["public_key_locked"], false);
+    let release = t.create("0.5.0").await;
+    let artifact = t.upload(&release, "windows-x86_64", true).await;
+    let locked = body(read().await).await;
+    assert_eq!(locked["product_id_locked"], true);
+    assert_eq!(locked["public_key_locked"], true);
+    t.state
+        .artifacts
+        .set_standalone(&t.actor, &t.app, &release.id, &artifact.id, None)
+        .await
+        .unwrap();
+    let cleared = body(read().await).await;
+    assert_eq!(cleared["product_id_locked"], true);
+    assert_eq!(cleared["public_key_locked"], false);
+    let signature = sign(&metadata(&t.product, "0.5.0", "windows-x86_64"));
+    t.state
+        .artifacts
+        .set_standalone(
+            &t.actor,
+            &t.app,
+            &release.id,
+            &artifact.id,
+            Some(&signature),
+        )
+        .await
+        .unwrap();
+    t.publish(&release).await.unwrap();
+    let published = body(read().await).await;
+    assert_eq!(published["product_id_locked"], true);
+    assert_eq!(published["public_key_locked"], true);
 }
 
 #[tokio::test]

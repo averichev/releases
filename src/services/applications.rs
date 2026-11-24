@@ -45,6 +45,9 @@ impl ApplicationCatalog {
     pub async fn get(&self, id: &str) -> Result<Application> {
         self.repository.get(id).await
     }
+    pub async fn standalone_settings(&self, id: &str) -> Result<(Application, bool)> {
+        self.repository.standalone_settings(id).await
+    }
     pub async fn create(&self, actor: &Identity, input: NewApplication) -> Result<Application> {
         if !application::valid_slug(&input.slug) {
             return Err(ServiceError::InvalidApplication);
