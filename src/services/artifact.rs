@@ -4,6 +4,7 @@ use crate::{
         artifact::{self, Artifact, UploadMetadata},
         publication::{compatible_tauri_format, compatible_tauri_target},
         release::ReleaseStatus,
+        standalone::VerificationError,
         user::Role,
     },
     infrastructure::{
@@ -40,15 +41,15 @@ pub struct ArtifactUpload {
 }
 impl ArtifactUpload {
     pub fn set_standalone_signature(&mut self, bytes: &[u8]) -> Result<()> {
-        if !matches!(self.distribution_role.as_str(), "executable" | "installer")
-            || bytes.is_empty()
-            || bytes.len() > crate::domain::standalone::MAX_SIGNATURE_BYTES
-        {
-            return Err(ServiceError::InvalidStandalone);
+        if !matches!(self.distribution_role.as_str(), "executable" | "installer") {
+            return Err(VerificationError::IncompatibleArtifact.into());
+        }
+        if bytes.is_empty() || bytes.len() > crate::domain::standalone::MAX_SIGNATURE_BYTES {
+            return Err(VerificationError::InvalidJws.into());
         }
         self.standalone_signature = Some(
             std::str::from_utf8(bytes)
-                .map_err(|_| ServiceError::InvalidStandalone)?
+                .map_err(|_| VerificationError::InvalidJws)?
                 .trim()
                 .to_owned(),
         );
@@ -154,9 +155,7 @@ impl ArtifactManagement {
         let release = ReleasesRepository::get_in(&mut tx, &upload.app, &upload.release).await?;
         if let Some(signature) = &artifact.standalone_signature {
             let app = ApplicationsRepository::get_in(&mut tx, &upload.app).await?;
-            if crate::domain::standalone::verify(signature, &app, &release, &artifact).is_none() {
-                return Err(ServiceError::InvalidStandalone);
-            }
+            crate::domain::standalone::verify(signature, &app, &release, &artifact)?;
         }
         ArtifactsRepository::check_conflict(
             &mut tx,
@@ -249,7 +248,7 @@ impl ArtifactManagement {
             if artifact.standalone_signature.is_some()
                 && !crate::domain::standalone::compatible(&artifact)
             {
-                return Err(ServiceError::InvalidStandalone);
+                return Err(VerificationError::IncompatibleArtifact.into());
             }
             if role != "updater" {
                 artifact.updater_signature = None;
@@ -303,9 +302,7 @@ impl ArtifactManagement {
             .ok_or(ServiceError::NotFound)?;
         if let Some(signature) = signature {
             let app = ApplicationsRepository::get_in(&mut tx, app).await?;
-            if crate::domain::standalone::verify(signature, &app, &r, &artifact).is_none() {
-                return Err(ServiceError::InvalidStandalone);
-            }
+            crate::domain::standalone::verify(signature, &app, &r, &artifact)?;
         }
         ArtifactsRepository::standalone(&mut tx, id, signature).await?;
         ReleasesRepository::touch(&mut tx, release, secrets::now()).await?;

@@ -47,8 +47,40 @@ const httpMessages: Partial<Record<number, string>> = {
   504: 'Прокси не дождался ответа сервера (HTTP 504). Обновите данные перед повторным действием.',
   507: messages.storage_full,
 };
+const standaloneMessages: Record<string, string> = {
+  configuration_missing: 'Для приложения не настроены UUID продукта и публичный ключ. Задайте product_id и public_key через API standalone-интеграции перед загрузкой подписанного обновления.',
+  product_id_missing: 'Для приложения не настроен UUID продукта. Задайте product_id через API standalone-интеграции — он должен совпадать с application_id в подписи .jws.',
+  public_key_missing: 'Для приложения не настроен публичный ключ. Сохраните публичный ключ издателя через API standalone-интеграции.',
+  invalid_public_key: 'В настройках приложения указан некорректный публичный ключ Ed25519.',
+  incompatible_artifact: 'Выбранный тип, формат или платформа файла не поддерживает подписанные обновления. Нужен исполняемый файл для конкретной ОС и архитектуры.',
+  invalid_jws: 'Некорректный файл подписи .jws. Нужен текстовый compact JWS до 4 KiB из той же сборки, что и исполняемый файл.',
+  invalid_header: 'Некорректный заголовок подписи .jws: нужны поля alg, typ и необязательный строковый kid, без дополнительных полей.',
+  invalid_algorithm: 'Алгоритм подписи .jws не поддерживается: ожидается EdDSA (Ed25519).',
+  invalid_media_type: 'Неверный тип подписи .jws: поле typ должно быть releases-standalone+jws.',
+  key_id_mismatch: 'Идентификатор ключа (kid) в .jws не соответствует публичному ключу приложения. Проверьте, каким ключом подписана сборка.',
+  invalid_signature: 'Криптографическая проверка .jws не пройдена с публичным ключом приложения. Подпись изменена или создана другим ключом.',
+  invalid_metadata: 'Данные внутри .jws не соответствуют формату подписи: отсутствует обязательное поле, неверен его тип или есть лишние поля.',
+};
+const standaloneFields: Record<string, string> = {
+  schema_version: 'версия формата подписи (schema_version)', application_id: 'UUID продукта (application_id)',
+  version: 'версия', os: 'операционная система', arch: 'архитектура', size_bytes: 'размер файла в байтах', sha256: 'SHA-256 файла',
+};
+const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const standaloneValue = (value: unknown): value is string => typeof value === 'string' && value.length <= 201 && /^[\x20-\x7e]*$/.test(value);
+function standaloneMessage(payload: unknown): string | undefined {
+  if (!record(payload) || !record(payload.error) || !record(payload.error.details)) return;
+  const details = payload.error.details;
+  if (details.reason === 'metadata_mismatch') {
+    const field = typeof details.field === 'string' ? standaloneFields[details.field] : undefined;
+    if (typeof field !== 'string' || !standaloneValue(details.expected)) return;
+    const actual = standaloneValue(details.actual) ? `«${details.actual}»` : 'некорректное значение';
+    return `Не совпадает ${field}: ожидается «${details.expected}», в подписи — ${actual}.`;
+  }
+  const message = typeof details.reason === 'string' ? standaloneMessages[details.reason] : undefined;
+  return typeof message === 'string' ? message : undefined;
+}
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, public details?: unknown) { super(messages[code] ?? httpMessages[status] ?? `Не удалось выполнить запрос (HTTP ${status}). Обратитесь к администратору сервера.`); }
+  constructor(public status: number, public code: string, public details?: unknown) { super((code === 'invalid_standalone' ? standaloneMessage(details) : undefined) ?? messages[code] ?? httpMessages[status] ?? `Не удалось выполнить запрос (HTTP ${status}). Обратитесь к администратору сервера.`); }
 }
 export async function api<T>(path: string, method = 'GET', data?: unknown, signal?: AbortSignal, timeoutMs = 15000): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };

@@ -8,6 +8,54 @@ use serde::{Deserialize, Serialize};
 pub const MAX_SIGNATURE_BYTES: usize = 4096;
 pub const MEDIA_TYPE: &str = "releases-standalone+jws";
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum MetadataField {
+    SchemaVersion,
+    ProductId,
+    Version,
+    Os,
+    Arch,
+    SizeBytes,
+    Sha256,
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum VerificationError {
+    #[error("Standalone product identity and public key are not configured")]
+    ConfigurationMissing,
+    #[error("Standalone product identity is not configured")]
+    ProductIdMissing,
+    #[error("Standalone public key is not configured")]
+    PublicKeyMissing,
+    #[error("Invalid standalone public key")]
+    InvalidPublicKey,
+    #[error("Artifact is incompatible with standalone updates")]
+    IncompatibleArtifact,
+    #[error("Standalone artifact ownership mismatch")]
+    OwnershipMismatch,
+    #[error("Invalid compact JWS file")]
+    InvalidJws,
+    #[error("Invalid protected JWS header")]
+    InvalidHeader,
+    #[error("JWS algorithm must be EdDSA")]
+    InvalidAlgorithm,
+    #[error("Invalid JWS media type")]
+    InvalidMediaType,
+    #[error("JWS key identifier does not match the trusted public key")]
+    KeyIdMismatch,
+    #[error("JWS signature verification failed")]
+    InvalidSignature,
+    #[error("Invalid signed metadata schema")]
+    InvalidMetadata,
+    // Display deliberately omits claim values; callers must not log request contents.
+    #[error("Signed standalone metadata does not match")]
+    MetadataMismatch {
+        field: MetadataField,
+        expected: String,
+        actual: String,
+    },
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
@@ -90,49 +138,96 @@ pub fn verify(
     application: &Application,
     release: &Release,
     artifact: &Artifact,
-) -> Option<Metadata> {
-    let product_id = application.product_id.as_deref()?;
-    let key = application.standalone_public_key.as_deref()?;
-    if jws.is_empty()
-        || jws.len() > MAX_SIGNATURE_BYTES
-        || !public_key(key)
-        || !compatible(artifact)
-        || artifact.release_id != release.id
-        || release.application_id != application.id
-    {
-        return None;
+) -> Result<Metadata, VerificationError> {
+    use VerificationError as E;
+    let (product_id, key) = match (
+        application.product_id.as_deref(),
+        application.standalone_public_key.as_deref(),
+    ) {
+        (None, None) => return Err(E::ConfigurationMissing),
+        (None, _) => return Err(E::ProductIdMissing),
+        (_, None) => return Err(E::PublicKeyMissing),
+        (Some(product_id), Some(key)) => (product_id, key),
+    };
+    if !public_key(key) {
+        return Err(E::InvalidPublicKey);
+    }
+    if artifact.release_id != release.id || release.application_id != application.id {
+        return Err(E::OwnershipMismatch);
+    }
+    if !compatible(artifact) || artifact.size_bytes <= 0 {
+        return Err(E::IncompatibleArtifact);
+    }
+    if jws.is_empty() || jws.len() > MAX_SIGNATURE_BYTES {
+        return Err(E::InvalidJws);
     }
     // Narrow profile rejects embedded/remote keys, critical extensions, detached
     // payloads and algorithm negotiation. The JOSE library verifies the signature.
-    let header = URL_SAFE_NO_PAD.decode(jws.split('.').next()?).ok()?;
-    let header: ProtectedHeader = serde_json::from_slice(&header).ok()?;
-    if header.alg != "EdDSA"
-        || header.typ != MEDIA_TYPE
-        || header
-            .kid
-            .as_deref()
-            .is_some_and(|kid| key_id(key).as_deref() != Some(kid))
+    let header = URL_SAFE_NO_PAD
+        .decode(jws.split('.').next().ok_or(E::InvalidJws)?)
+        .map_err(|_| E::InvalidJws)?;
+    let header: ProtectedHeader = serde_json::from_slice(&header).map_err(|_| E::InvalidHeader)?;
+    if header.alg != "EdDSA" {
+        return Err(E::InvalidAlgorithm);
+    }
+    if header.typ != MEDIA_TYPE {
+        return Err(E::InvalidMediaType);
+    }
+    if header
+        .kid
+        .as_deref()
+        .is_some_and(|kid| key_id(key).as_deref() != Some(kid))
     {
-        return None;
+        return Err(E::KeyIdMismatch);
     }
     let mut validation = Validation::new(Algorithm::EdDSA);
     validation.required_spec_claims.clear();
     validation.validate_exp = false; // Immutable release metadata, not a login JWT.
     let decoded = jsonwebtoken::decode::<Metadata>(
         jws,
-        &DecodingKey::from_ed_components(key).ok()?,
+        &DecodingKey::from_ed_components(key).map_err(|_| E::InvalidPublicKey)?,
         &validation,
     )
-    .ok()?;
+    .map_err(|error| match error.kind() {
+        jsonwebtoken::errors::ErrorKind::InvalidSignature => E::InvalidSignature,
+        jsonwebtoken::errors::ErrorKind::Json(_) => E::InvalidMetadata,
+        _ => E::InvalidJws,
+    })?;
     let m = decoded.claims;
-    let (os, arch) = artifact.target.split_once('-')?;
-    (m.schema_version == 1
-        && m.application_id == product_id
-        && m.version == release.version.to_string()
-        && m.os == os
-        && m.arch == arch
-        && artifact.size_bytes > 0
-        && m.size_bytes == artifact.size_bytes as u64
-        && m.sha256 == artifact.sha256)
-        .then_some(m)
+    let (os, arch) = artifact
+        .target
+        .split_once('-')
+        .ok_or(E::IncompatibleArtifact)?;
+    // Claims are compared and exposed only after cryptographic verification.
+    let compare = |field, expected: &str, actual: &str| {
+        if expected == actual {
+            Ok(())
+        } else {
+            Err(E::MetadataMismatch {
+                field,
+                expected: expected.to_owned(),
+                actual: actual.to_owned(),
+            })
+        }
+    };
+    compare(
+        MetadataField::SchemaVersion,
+        "1",
+        &m.schema_version.to_string(),
+    )?;
+    compare(MetadataField::ProductId, product_id, &m.application_id)?;
+    compare(
+        MetadataField::Version,
+        &release.version.to_string(),
+        &m.version,
+    )?;
+    compare(MetadataField::Os, os, &m.os)?;
+    compare(MetadataField::Arch, arch, &m.arch)?;
+    compare(
+        MetadataField::SizeBytes,
+        &artifact.size_bytes.to_string(),
+        &m.size_bytes.to_string(),
+    )?;
+    compare(MetadataField::Sha256, &artifact.sha256, &m.sha256)?;
+    Ok(m)
 }

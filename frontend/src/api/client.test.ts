@@ -41,3 +41,29 @@ it('explains a proxy size rejection returned as HTML for a fetch upload', async 
     status: 413, message: expect.stringMatching(/HTTP 413.*лимит прокси/),
   });
 });
+
+it('explains the exact signed field mismatch returned by the API', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({error: {
+    code: 'invalid_standalone', details: {reason: 'metadata_mismatch', field: 'version', expected: '0.7.2', actual: '0.7.1'},
+  }}), {status: 422})));
+  await expect(api('/admin/artifact/standalone', 'PUT', {})).rejects.toMatchObject({
+    code: 'invalid_standalone', status: 422, message: 'Не совпадает версия: ожидается «0.7.2», в подписи — «0.7.1».',
+  });
+});
+
+it.each([
+  {reason: 'unknown_reason', message: 'private server detail'},
+  {reason: 'metadata_mismatch', field: 'unknown', expected: 'secret', actual: 'secret'},
+  {reason: 'metadata_mismatch', field: 'version', expected: {internal: 'secret'}},
+  {reason: 'constructor'},
+  null,
+])('falls back safely for unknown or malformed standalone details %j', (details) => {
+  const error = new ApiError(422, 'invalid_standalone', {error: {message: 'private server detail', details}});
+  expect(error.message).toMatch(/Проверьте подпись .jws/);
+  expect(error.message).not.toMatch(/secret|private server detail/);
+});
+
+it('does not display malformed signed values as diagnostic text', () => {
+  const error = new ApiError(422, 'invalid_standalone', {error: {details: {reason: 'metadata_mismatch', field: 'version', expected: '0.7.2', actual: null}}});
+  expect(error.message).toBe('Не совпадает версия: ожидается «0.7.2», в подписи — некорректное значение.');
+});

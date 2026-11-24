@@ -25,6 +25,14 @@ Standalone GET сохраняет `application_id` как внутренний U
 
 Multipart загрузка артефакта также принимает файл `standalone_signature` (`.jws`, максимум 4096 байт), проверяемый до фиксации. Наличие подписи явно назначает installer для standalone-обновлений. Artifact DTO дополнен `standalone_signature_present`; роль и прежний `signature_present` для Tauri не меняются. Опубликованный релиз можно дополнить подписанным файлом другой платформы в одной загрузке. Формат JWS, ограничения ключа и примеры: [standalone](integrations/standalone.md).
 
+При загрузке и назначении `.jws` код `422 invalid_standalone` сохраняется, а `error.details.reason` уточняет причину: `configuration_missing` (нет UUID продукта и ключа), `product_id_missing`, `public_key_missing`, `invalid_public_key`, `incompatible_artifact`, `invalid_jws`, `invalid_header`, `invalid_algorithm`, `invalid_media_type`, `key_id_mismatch`, `invalid_signature`, `invalid_metadata` или `metadata_mismatch`. Для первого несовпавшего подписанного поля сервер возвращает `field`, `expected` и `actual` как строки, например:
+
+```json
+{"error":{"code":"invalid_standalone","message":"Standalone verification failed","details":{"reason":"metadata_mismatch","field":"version","expected":"0.7.2","actual":"0.7.1"}}}
+```
+
+Поля: `schema_version`, `application_id` (UUID продукта), `version`, `os`, `arch`, `size_bytes`, `sha256`. Значения сравниваются только после проверки Ed25519; при ошибке подписи сервер не выдаёт содержимое payload. Значение `actual` заменяется на `null`, если оно длиннее 201 байта или содержит непечатные/не-ASCII символы. Ключи, исходный JWS и внутренние ошибки в диагностику не включаются; публичный updater по-прежнему возвращает общее `standalone_unavailable` при повреждённом опубликованном обновлении. Старые ответы без `details` поддерживаются панелью.
+
 ## Список
 
 | Query | Допустимые значения | По умолчанию |

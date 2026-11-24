@@ -416,7 +416,9 @@ async fn signed_executables_use_canonical_target_independently_of_filename_forma
                     None
                 )
                 .await,
-            Err(ServiceError::InvalidStandalone)
+            Err(ServiceError::StandaloneVerification(
+                standalone::VerificationError::IncompatibleArtifact
+            ))
         ));
     }
     // The one-signed-file-per-target rule spans both classifications and formats.
@@ -705,7 +707,7 @@ async fn identity_migration_preserves_legacy_published_and_draft_jws_byte_for_by
                 a.standalone_signature.as_ref().unwrap().as_bytes(),
                 signature.as_bytes()
             );
-            assert!(standalone::verify(signature, &p, &r, &a).is_some());
+            assert!(standalone::verify(signature, &p, &r, &a).is_ok());
             assert!(
                 sqlx::query("UPDATE applications SET product_id=NULL WHERE id=?")
                     .bind(app)
@@ -847,10 +849,13 @@ async fn publisher_signature_works_on_two_independent_servers() {
             .await
             .unwrap()
             .remove(0);
-        assert!(standalone::verify(&signature, &app, &r, &artifact).is_some());
+        assert!(standalone::verify(&signature, &app, &r, &artifact).is_ok());
         let mut wrong_owner = r.clone();
         wrong_owner.application_id = uuid::Uuid::new_v4().to_string();
-        assert!(standalone::verify(&signature, &app, &wrong_owner, &artifact).is_none());
+        assert!(matches!(
+            standalone::verify(&signature, &app, &wrong_owner, &artifact),
+            Err(standalone::VerificationError::OwnershipMismatch)
+        ));
     }
 }
 
@@ -1038,7 +1043,9 @@ async fn unsigned_distribution_needs_no_identity_but_first_signature_requires_it
             .artifacts
             .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(&signature))
             .await,
-        Err(ServiceError::InvalidStandalone)
+        Err(ServiceError::StandaloneVerification(
+            standalone::VerificationError::ProductIdMissing
+        ))
     ));
     assert!(
         sqlx::query("UPDATE artifacts SET standalone_signature=? WHERE id=?")
@@ -1258,7 +1265,15 @@ async fn concurrent_settings_preserve_omitted_fields_and_serialize_first_signatu
             assert_eq!(app.product_id.as_deref(), Some(t.product.as_str()));
             assert!(app.product_id_locked);
         }
-        (Err(ServiceError::InvalidStandalone), Ok(())) => {
+        (
+            Err(ServiceError::StandaloneVerification(
+                standalone::VerificationError::MetadataMismatch {
+                    field: standalone::MetadataField::ProductId,
+                    ..
+                },
+            )),
+            Ok(()),
+        ) => {
             assert_eq!(app.product_id.as_deref(), Some(next.as_str()));
             assert!(!app.product_id_locked);
             assert!(
@@ -1406,18 +1421,42 @@ async fn signed_claims_and_jose_profile_are_verified_and_invalid_uploads_are_ato
         ("extra", json!(true)),
     ] {
         let mut m = valid.clone();
-        m[field] = value;
+        m[field] = value.clone();
         let response = t.multipart(&r, target, Some(&sign(&m)), false).await;
         assert_eq!(response.status(), 422, "claim: {field}");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let error = body(response).await;
+        assert_eq!(error["error"]["code"], "invalid_standalone");
+        if field == "extra" {
+            assert_eq!(
+                error["error"]["details"],
+                json!({"reason": "invalid_metadata"})
+            );
+        } else {
+            let scalar = |value: &Value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string())
+            };
+            assert_eq!(
+                error["error"]["details"],
+                json!({
+                    "reason": "metadata_mismatch", "field": field,
+                    "expected": scalar(&valid[field]), "actual": scalar(&value)
+                }),
+                "claim: {field}"
+            );
+        }
     }
     let mut header = Header::new(Algorithm::EdDSA);
     header.typ = Some(standalone::MEDIA_TYPE.into());
     let wrong_key = sign_header(&valid, &header, &[42; 32]);
+    let response = t.multipart(&r, target, Some(&wrong_key), false).await;
+    assert_eq!(response.status(), 422);
     assert_eq!(
-        t.multipart(&r, target, Some(&wrong_key), false)
-            .await
-            .status(),
-        422
+        body(response).await["error"]["details"],
+        json!({"reason": "invalid_signature"})
     );
     let mut symmetric_header = Header::new(Algorithm::HS256);
     symmetric_header.typ = Some(standalone::MEDIA_TYPE.into());
@@ -1427,21 +1466,26 @@ async fn signed_claims_and_jose_profile_are_verified_and_invalid_uploads_are_ato
         &EncodingKey::from_secret(PUBLIC_KEY.as_bytes()).unwrap(),
     )
     .unwrap();
+    let response = t
+        .multipart(&r, target, Some(&algorithm_confusion), false)
+        .await;
+    assert_eq!(response.status(), 422);
     assert_eq!(
-        t.multipart(&r, target, Some(&algorithm_confusion), false)
-            .await
-            .status(),
-        422
+        body(response).await["error"]["details"],
+        json!({"reason": "invalid_algorithm"})
     );
     let mut pieces: Vec<String> = sign(&valid).split('.').map(str::to_owned).collect();
     let mut tampered = valid.clone();
     tampered["version"] = json!("0.9.0");
     pieces[1] = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&tampered).unwrap());
+    let response = t
+        .multipart(&r, target, Some(&pieces.join(".")), false)
+        .await;
+    assert_eq!(response.status(), 422);
+    // Never report a claim mismatch from an unauthenticated payload.
     assert_eq!(
-        t.multipart(&r, target, Some(&pieces.join(".")), false)
-            .await
-            .status(),
-        422
+        body(response).await["error"]["details"],
+        json!({"reason": "invalid_signature"})
     );
     header.typ = Some("JWT".into());
     assert_eq!(
@@ -1499,6 +1543,63 @@ async fn signed_claims_and_jose_profile_are_verified_and_invalid_uploads_are_ato
     t.upload(&r, target, false).await;
     t.publish(&r).await.unwrap();
     assert_eq!(t.update(target, "0.1.0").await.status(), 204);
+}
+
+#[tokio::test]
+async fn upload_reports_missing_standalone_configuration_without_saving_artifacts() {
+    let t = TestApp::unconfigured().await;
+    let r = t.create("0.7.2").await;
+    let signature = sign(&metadata(&t.product, "0.7.2", "linux-x86_64"));
+    for (product, key, reason) in [
+        (None, None, "configuration_missing"),
+        (Some(t.product.as_str()), None, "public_key_missing"),
+        (None, Some(PUBLIC_KEY), "product_id_missing"),
+    ] {
+        t.state
+            .applications
+            .set_standalone_settings(&t.actor, &t.app, Some(product), Some(key))
+            .await
+            .unwrap();
+        let response = t
+            .multipart(&r, "linux-x86_64", Some(&signature), false)
+            .await;
+        assert_eq!(response.status(), 422);
+        let error = body(response).await;
+        assert_eq!(error["error"]["code"], "invalid_standalone");
+        assert_eq!(error["error"]["details"], json!({"reason": reason}));
+    }
+    assert!(
+        t.state
+            .artifacts
+            .list(&t.app, &r.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    t.assert_storage_count(0).await;
+}
+
+#[tokio::test]
+async fn standalone_diagnostics_do_not_echo_arbitrary_signed_payloads() {
+    let t = TestApp::new().await;
+    let r = t.create("0.5.0").await;
+    for invalid in [
+        "x".repeat(500),
+        "private\ncontent".into(),
+        "\u{202e}0.5.0".into(),
+    ] {
+        let mut claims = metadata(&t.product, "0.5.0", "windows-x86_64");
+        claims["version"] = json!(invalid);
+        let response = t
+            .multipart(&r, "windows-x86_64", Some(&sign(&claims)), false)
+            .await;
+        assert_eq!(response.status(), 422);
+        assert_eq!(
+            body(response).await["error"]["details"],
+            json!({"reason": "metadata_mismatch", "field": "version", "expected": "0.5.0", "actual": null})
+        );
+    }
+    t.assert_storage_count(0).await;
 }
 
 #[tokio::test]
@@ -1857,7 +1958,12 @@ async fn interrupted_upload_append_failure_and_concurrent_version_changes_reclai
         .unwrap();
     assert!(matches!(
         t.state.artifacts.complete(&t.actor, pending).await,
-        Err(ServiceError::InvalidStandalone)
+        Err(ServiceError::StandaloneVerification(
+            standalone::VerificationError::MetadataMismatch {
+                field: standalone::MetadataField::Version,
+                ..
+            }
+        ))
     ));
     t.assert_storage_count(0).await;
     let current = t.state.releases.get(&t.app, &r.id).await.unwrap();
@@ -2180,7 +2286,9 @@ async fn optional_key_id_is_bound_to_trusted_key_and_legacy_signatures_still_wor
                 .artifacts
                 .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(&signature))
                 .await,
-            Err(ServiceError::InvalidStandalone)
+            Err(ServiceError::StandaloneVerification(
+                standalone::VerificationError::KeyIdMismatch
+            ))
         ));
     }
     header.kid = None;
@@ -2191,7 +2299,9 @@ async fn optional_key_id_is_bound_to_trusted_key_and_legacy_signatures_still_wor
             .artifacts
             .set_standalone(&t.actor, &t.app, &r.id, &a.id, Some(&signature))
             .await,
-        Err(ServiceError::InvalidStandalone)
+        Err(ServiceError::StandaloneVerification(
+            standalone::VerificationError::InvalidHeader
+        ))
     ));
     // No identifier remains a valid, unambiguous reference to the one pinned key.
     for kid in [None, Some(kid)] {

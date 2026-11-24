@@ -82,7 +82,8 @@ a { color: #236b54; }
 .auth-card .ant-card-body { padding: 34px; }
 .auth-card h1.ant-typography { font-size: 28px; letter-spacing: -.7px; margin-top: 0; }
 .auth-note { text-align: center; font-size: 12px; color: #7c877f; line-height: 1.9; margin: 22px 10px 0; }
-.form-alert { margin-bottom: 22px; }
+.form-alert { margin-bottom: 22px; overflow-wrap: anywhere; }
+.form-alert .ant-alert-content { min-width: 0; }
 .auth-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
 .page-heading-actions { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
 .profile-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px; max-width: 1080px; }

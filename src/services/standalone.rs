@@ -53,7 +53,7 @@ impl StandaloneUpdater {
                 .standalone_signature
                 .as_deref()
                 .ok_or(ServiceError::StandaloneUnavailable)?;
-            if standalone::verify(signature, &catalog.application, release, artifact).is_none() {
+            if standalone::verify(signature, &catalog.application, release, artifact).is_err() {
                 // A broken designated update blocks; never silently roll back
                 // to an older candidate or offer an unsigned installer.
                 return Err(ServiceError::StandaloneUnavailable);

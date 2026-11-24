@@ -277,6 +277,13 @@ impl From<ServiceError> for ApiError {
     fn from(error: ServiceError) -> Self {
         match error {
             ServiceError::InvalidStandalone => Self::InvalidStandalone,
+            ServiceError::StandaloneVerification(
+                crate::domain::standalone::VerificationError::OwnershipMismatch,
+            ) => {
+                tracing::error!("Standalone artifact ownership mismatch");
+                Self::Internal
+            }
+            ServiceError::StandaloneVerification(error) => Self::StandaloneVerification(error),
             ServiceError::StandaloneKeyConflict => Self::StandaloneKeyConflict,
             ServiceError::StandaloneProductConflict => Self::StandaloneProductConflict,
             ServiceError::StandaloneUnavailable => Self::StandaloneUnavailable,

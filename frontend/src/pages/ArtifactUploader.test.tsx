@@ -120,6 +120,26 @@ it.each(['artifact_exists', 'updater_signature_required', 'invalid_standalone'])
 });
 
 it.each([
+  [{reason: 'configuration_missing'}, /не настроены UUID продукта и публичный ключ/],
+  [{reason: 'metadata_mismatch', field: 'arch', expected: 'x86_64', actual: 'aarch64'}, /Не совпадает архитектура: ожидается «x86_64», в подписи — «aarch64»/],
+  [{reason: 'invalid_signature'}, /Криптографическая проверка .jws не пройдена/],
+])('shows the standalone verification reason and preserves both files for retry: %j', async (details, message) => {
+  class RejectedXhr {
+    upload = {}; status = 422; responseText = JSON.stringify({error: {code: 'invalid_standalone', details}}); onload?: () => void;
+    open() {} setRequestHeader() {} send() { this.onload?.(); }
+  }
+  vi.stubGlobal('XMLHttpRequest', RejectedXhr); renderUploader([]);
+  await choose('Пакет обновления', 'Linux'); chooseFile('program-0.7.2-linux-x86_64');
+  fireEvent.change(screen.getByLabelText('Подпись издателя (.jws)'), {target: {files: [new File(['signed-metadata'], 'program.jws')]}});
+  fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
+  expect((await screen.findByRole('alert')).textContent).toMatch(message);
+  expect(screen.getByText('program-0.7.2-linux-x86_64 · 3 B · BIN')).toBeDefined();
+  expect((screen.getByLabelText('Подпись издателя (.jws)') as HTMLInputElement).files?.[0]?.name).toBe('program.jws');
+  expect(screen.queryByText('Файл загружен и сохранён.')).toBeNull();
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Загрузить файл'}) as HTMLButtonElement).disabled).toBe(false));
+});
+
+it.each([
   ['Исполняемый файл', 'executable', 'program.exe', 'Windows', 'windows-x86_64'],
   ['Исполняемый файл', 'executable', 'program-0.7.0-linux-x86_64', 'Linux', 'linux-x86_64'],
   ['Исполняемый файл', 'executable', 'program.x86_64', 'Linux', 'linux-x86_64'],

@@ -179,7 +179,9 @@ async fn upload(
                         .ends_with(if standalone { ".jws" } else { ".sig" })
                 }) {
                     return Err(if standalone {
-                        ApiError::InvalidStandalone
+                        ApiError::StandaloneVerification(
+                            crate::domain::standalone::VerificationError::InvalidJws,
+                        )
                     } else {
                         ApiError::InvalidUpdater
                     });

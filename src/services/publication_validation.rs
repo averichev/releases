@@ -132,7 +132,7 @@ impl PublicationValidator {
                     &snapshot.release,
                     artifact,
                 )
-                .is_none()
+                .is_err()
             {
                 errors.push(issue(
                     "standalone_invalid",

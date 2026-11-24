@@ -7,6 +7,7 @@ use serde::Serialize;
 
 pub enum ApiError {
     InvalidStandalone,
+    StandaloneVerification(crate::domain::standalone::VerificationError),
     StandaloneKeyConflict,
     StandaloneProductConflict,
     StandaloneUnavailable,
@@ -57,6 +58,18 @@ struct ErrorBody {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::StandaloneVerification(error) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    [(axum::http::header::CACHE_CONTROL, "no-store")],
+                    Json(serde_json::json!({"error": {
+                        "code": "invalid_standalone",
+                        "message": "Standalone verification failed",
+                        "details": standalone_details(error)
+                    }})),
+                )
+                    .into_response();
+            }
             Self::InvalidStandalone => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_standalone",
@@ -243,4 +256,43 @@ impl IntoResponse for ApiError {
         )
             .into_response()
     }
+}
+
+fn standalone_details(error: crate::domain::standalone::VerificationError) -> serde_json::Value {
+    use crate::domain::standalone::{MetadataField, VerificationError as E};
+    let reason = match error {
+        E::ConfigurationMissing => "configuration_missing",
+        E::ProductIdMissing => "product_id_missing",
+        E::PublicKeyMissing => "public_key_missing",
+        E::InvalidPublicKey => "invalid_public_key",
+        E::IncompatibleArtifact => "incompatible_artifact",
+        E::OwnershipMismatch => "artifact_mismatch",
+        E::InvalidJws => "invalid_jws",
+        E::InvalidHeader => "invalid_header",
+        E::InvalidAlgorithm => "invalid_algorithm",
+        E::InvalidMediaType => "invalid_media_type",
+        E::KeyIdMismatch => "key_id_mismatch",
+        E::InvalidSignature => "invalid_signature",
+        E::InvalidMetadata => "invalid_metadata",
+        E::MetadataMismatch {
+            field,
+            expected,
+            actual,
+        } => {
+            let field = match field {
+                MetadataField::SchemaVersion => "schema_version",
+                MetadataField::ProductId => "application_id",
+                MetadataField::Version => "version",
+                MetadataField::Os => "os",
+                MetadataField::Arch => "arch",
+                MetadataField::SizeBytes => "size_bytes",
+                MetadataField::Sha256 => "sha256",
+            };
+            // All profile fields are ASCII scalars. Do not reflect arbitrary payloads.
+            let actual = (actual.len() <= 201 && actual.bytes().all(|b| (32..=126).contains(&b)))
+                .then_some(actual);
+            return serde_json::json!({"reason": "metadata_mismatch", "field": field, "expected": expected, "actual": actual});
+        }
+    };
+    serde_json::json!({"reason": reason})
 }

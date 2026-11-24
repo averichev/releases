@@ -2,6 +2,8 @@
 pub enum ServiceError {
     #[error("Invalid standalone product identity, metadata, signature, key or platform")]
     InvalidStandalone,
+    #[error("Standalone verification failed")]
+    StandaloneVerification(#[from] crate::domain::standalone::VerificationError),
     #[error("Standalone key is already used or pinned by signed artifacts")]
     StandaloneKeyConflict,
     #[error("Product identity is already used or pinned by signed artifacts")]
