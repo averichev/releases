@@ -424,6 +424,83 @@ async fn tokens_require_admin_session_csrf_allow_rotation_and_return_secret_only
 }
 
 #[tokio::test]
+async fn installation_scripts_resolve_to_the_selected_os_even_with_the_same_filename() {
+    let t = TestApp::new().await;
+    let legacy = json!({"version":"0.9.0","notes":"","artifacts":[
+        {"target":"linux","distribution_role":"installer","file_type":"sh","file":"legacy"}
+    ]});
+    let legacy_bytes = b"#!/bin/sh\n# Original installer\n";
+    let original = value(
+        t.send(&legacy, &[Part::file("legacy", "install.sh", legacy_bytes)])
+            .await,
+        201,
+    )
+    .await;
+    let scripts = [
+        (
+            "linux",
+            "sh",
+            "install.sh",
+            b"#!/bin/sh\n# Linux\n".as_slice(),
+        ),
+        ("darwin", "sh", "install.sh", b"#!/bin/sh\n# macOS\n"),
+        ("windows", "ps1", "install.ps1", b"# Windows\r\n"),
+    ];
+    let artifacts: Vec<_> = scripts.iter().map(|(os, format, _, _)| {
+        json!({"target":os,"distribution_role":"script","file_type":format,"file":os})
+    }).collect();
+    let parts: Vec<_> = scripts
+        .iter()
+        .map(|(os, _, name, bytes)| Part::file(os, name, bytes))
+        .collect();
+    value(
+        t.send(
+            &json!({"version":"1.0.0","notes":"","artifacts":artifacts}),
+            &parts,
+        )
+        .await,
+        201,
+    )
+    .await;
+    for (os, format, _, bytes) in scripts {
+        t.download(
+            &format!("/product/latest/{os}?type=script&format={format}"),
+            bytes,
+        )
+        .await;
+    }
+    t.download("/product/latest/linux?format=sh", legacy_bytes)
+        .await;
+    t.download(
+        "/product/latest/linux?type=installer&format=sh",
+        legacy_bytes,
+    )
+    .await;
+    assert_eq!(
+        value(
+            t.send(&legacy, &[Part::file("legacy", "install.sh", legacy_bytes)])
+                .await,
+            200
+        )
+        .await,
+        original
+    );
+    for path in [
+        "/product/latest/windows?type=script&format=sh",
+        "/product/latest/any?type=script&format=sh",
+        "/product/latest/linux-x86_64?type=script&format=sh",
+    ] {
+        let response = t
+            .router
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 404, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn multi_target_publication_retries_with_other_token_and_transport_then_survives_restart() {
     let mut t = TestApp::new().await;
     let mut input = metadata(" v1.2.0+ci.7 ");

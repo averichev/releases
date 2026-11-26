@@ -71,7 +71,8 @@ pub struct Metadata {
 
 /// Only concrete, canonical targets. No automatic architecture/OS fallback.
 pub fn target(value: &str) -> bool {
-    super::artifact::TARGETS.contains(&value) && !matches!(value, "any" | "darwin-universal")
+    super::artifact::TARGETS.contains(&value)
+        && matches!(value.split_once('-'), Some((_, "x86_64" | "aarch64")))
 }
 pub fn compatible(artifact: &Artifact) -> bool {
     target(&artifact.target)

@@ -48,6 +48,37 @@ it('shows a real empty release state', async () => {
   vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(url.includes('/releases?') ? {items: [], total: 0} : {...application, latest_by_target: {}})))));
   renderPage();expect(await screen.findByText('Файлов для скачивания пока нет')).toBeDefined();
 });
+it('combines OS and type filters and includes cross-platform files of the selected type', async () => {
+  function targets(purpose: string, files: string[][]) {
+    return Object.fromEntries(files.map(([target, filename, format]) => {
+      const file = {...artifact, purpose, target, filename, format, download_url: `/product/releases/1.0.0/artifacts/${target}/download`};
+      return [target, {...release, artifacts: [file]}];
+    }));
+  }
+  const data = {...application, latest_by_type: {
+    script: targets('script', [['linux', 'install.sh', 'sh'], ['darwin', 'install.sh', 'sh'], ['windows', 'install.ps1', 'ps1']]),
+    installer: targets('installer', [['linux-x86_64', 'setup.deb', 'deb'], ['any', 'setup.zip', 'zip']]),
+  }};
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(url.includes('/releases?') ? {items: [], total: 0} : data)))));
+  renderPage();
+  const os = await screen.findByRole('combobox', {name: 'Операционная система'});
+  expect(screen.getByRole('link', {name: 'Скачать SH · macOS'})).toBeDefined();
+  fireEvent.mouseDown(os);
+  fireEvent.click(await screen.findByText('Linux', {selector: '.ant-select-item-option-content'}));
+  expect(screen.getByRole('link', {name: 'Скачать SH · Linux'}).getAttribute('href')).toBe('/product/releases/1.0.0/artifacts/linux/download');
+  expect(screen.getByRole('link', {name: 'Скачать DEB · Linux x64'})).toBeDefined();
+  expect(screen.getByRole('link', {name: 'Скачать ZIP · Любая платформа'})).toBeDefined();
+  expect(screen.queryByRole('link', {name: 'Скачать SH · macOS'})).toBeNull();
+  expect(screen.queryByRole('link', {name: 'Скачать PS1 · Windows'})).toBeNull();
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Тип файла'}));
+  fireEvent.click(await screen.findByText('Установочный скрипт', {selector: '.ant-select-item-option-content'}));
+  expect(screen.getByRole('link', {name: 'Скачать SH · Linux'})).toBeDefined();
+  expect(screen.queryByRole('link', {name: 'Скачать DEB · Linux x64'})).toBeNull();
+  expect(screen.queryByRole('link', {name: 'Скачать ZIP · Любая платформа'})).toBeNull();
+  fireEvent.mouseDown(os);
+  fireEvent.click(await screen.findByText('Все ОС', {selector: '.ant-select-item-option-content'}));
+  expect(screen.getByRole('link', {name: 'Скачать PS1 · Windows'})).toBeDefined();
+});
 it('shows 404 for a hidden application', async () => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({error: {code: 'not_found'}}), {status: 404}))));
   renderPage();expect(await screen.findByText('Приложение не найдено')).toBeDefined();

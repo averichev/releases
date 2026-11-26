@@ -4,19 +4,17 @@ import { Alert, Button, Collapse, Form, Input, Progress, Result, Select, Space, 
 import type { UploadFile } from 'antd';
 import { Link } from 'react-router-dom';
 import { api, upload } from '../api/client';
-import { artifactsPath, detectedType, releaseError, size, type Artifact, type ArtifactType, type UploadOptions } from '../api/releases';
+import { artifactsPath, artifactTypes, detectedType, releaseError, size, targetName, targetOs, type Artifact, type ArtifactType, type UploadOptions } from '../api/releases';
 import { missingStandaloneSettings, standalonePath, standaloneSettingsRoute, type StandaloneSettings } from '../api/standalone';
 
 type UploadKind = ArtifactType | 'standalone';
 type StandaloneCheck = {kind: 'loading'} | {kind: 'error'; message: string} | {kind: 'ready'; settings: StandaloneSettings};
 const kinds: {value: UploadKind; role: ArtifactType; label: string; description: string}[] = [
-  {value: 'installer', role: 'installer', label: 'Установочный файл', description: 'Устанавливает приложение: например, Setup EXE, MSI, DMG, DEB или RPM. Нужен один файл.'},
-  {value: 'executable', role: 'executable', label: 'Исполняемый файл', description: 'Самостоятельное приложение, которое запускают напрямую. Нужен один файл, установщик и подпись не требуются.'},
-  {value: 'archive', role: 'archive', label: 'Архив', description: 'ZIP, TAR.GZ или другой архив с приложением. Нужен один файл.'},
+  ...artifactTypes.filter((type) => type.value !== 'updater').map((type) => ({...type, role: type.value})),
   {value: 'standalone', role: 'executable', label: 'Пакет обновления', description: 'Для обновления отдельного исполняемого файла. Нужны два файла: само приложение и его подпись издателя .jws.'},
   {value: 'updater', role: 'updater', label: 'Пакет обновления Tauri', description: 'Для приложения на Tauri. Нужны два файла из одной сборки: пакет обновления и его подпись .sig.'},
 ];
-const osName = (os: string) => ({windows: 'Windows', linux: 'Linux', darwin: 'macOS (darwin)', any: 'Любая ОС'})[os] ?? os;
+const osName = (os: string) => os === 'darwin' ? 'macOS (darwin)' : os === 'any' ? 'Любая ОС' : targetName(os);
 const tauriFormats = (os?: string) => os === 'windows' ? ['exe', 'msi'] : os === 'linux' ? ['appimage'] : os === 'darwin' ? ['tar.gz'] : [];
 const tauriHint = (os?: string) => os === 'windows' ? 'Установщик Tauri .exe или .msi' : os === 'linux' ? 'Пакет Tauri .AppImage' : 'Пакет Tauri .app.tar.gz';
 
@@ -42,12 +40,15 @@ export default function ArtifactUploader({ applicationId, releaseId, artifacts, 
   const settingsReady = kind !== 'standalone' || (standalone?.kind === 'ready' && !missingSettings);
   const selectedKind = kinds.find((item) => item.value === kind);
   const role = selectedKind?.role;
-  const targets = options.targets.filter((value) => kind === 'standalone' ? value !== 'any' && value !== 'darwin-universal' : kind === 'updater' ? value !== 'any' : true)
-    .map((value) => ({value, os: value.split('-')[0] ?? value}));
+  const targets = options.targets.filter((value) => {
+    const arch = value.split('-')[1];
+    if (kind === 'standalone') return arch === 'x86_64' || arch === 'aarch64';
+    return kind !== 'updater' || !!arch;
+  }).map((value) => ({value, os: targetOs(value)}));
   const systems = [...new Set(targets.map((item) => item.os))];
   const signing = kind === 'standalone' ? {label: 'Подпись издателя (.jws)', extension: '.jws', limit: 4096, field: 'standalone_signature'}
     : kind === 'updater' ? {label: 'Подпись Tauri (.sig)', extension: '.sig', limit: 16384, field: 'signature'} : undefined;
-  const detectedFormat = (name: string) => detectedType(name, role === 'executable' || role === 'installer' ? target : undefined) ?? 'bin';
+  const detectedFormat = (name: string) => detectedType(name, role === 'archive' || role === 'updater' ? undefined : target) ?? 'bin';
   function clearSignature() { setSignature(undefined); if (signatureInput.current) signatureInput.current.value = ''; }
   function resetFiles() { setFile(undefined); clearSignature(); setFormat(''); setError(''); setNotice(''); setPercent(0); }
   async function send() {
@@ -100,8 +101,8 @@ export default function ArtifactUploader({ applicationId, releaseId, artifacts, 
       {kind && settingsReady && <div className="artifact-platform-fields"><Form.Item label="2. Операционная система" required>
         <Select aria-label="Операционная система" placeholder="Выберите ОС" value={os} onChange={(value) => { setOs(value); setTarget(value === 'any' ? 'any' : undefined); resetFiles(); }} options={systems.map((value) => ({value, label: osName(value)}))} />
       </Form.Item>
-      {os && os !== 'any' && <Form.Item label="3. Архитектура" required extra="Сопоставьте обозначение с ОС и архитектурой в имени файла сборки.">
-        <Select key={os} aria-label="Архитектура" placeholder="Выберите обозначение сборки" value={target} onChange={(value) => { setTarget(value); resetFiles(); }} options={targets.filter((item) => item.os === os).map((item) => ({value: item.value, label: item.value}))} />
+      {os && os !== 'any' && <Form.Item label="3. Архитектура" required extra={signing ? 'Выберите архитектуру сборки.' : 'Если один файл подходит для разных процессоров этой ОС, выберите «Любая архитектура».'}>
+        <Select key={os} aria-label="Архитектура" placeholder="Выберите архитектуру" value={target} onChange={(value) => { setTarget(value); resetFiles(); }} options={targets.filter((item) => item.os === os).map((item) => ({value: item.value, label: item.value === os ? 'Любая архитектура' : item.value}))} />
       </Form.Item>}</div>}
       {target && settingsReady && <>
         <Typography.Paragraph>Платформа: <Typography.Text code>{target}</Typography.Text>{target === 'any' && ' — без привязки к ОС и архитектуре.'}</Typography.Paragraph>

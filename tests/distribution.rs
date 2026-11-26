@@ -229,6 +229,7 @@ async fn universal_artifact_types_share_one_release_and_keep_original_bytes_with
         ("linux-aarch64", "mockport-aarch64", "executable", "bin"),
         ("windows-x86_64", "MockPort-Setup.exe", "installer", "exe"),
         ("linux-x86_64", "mockport.tar.gz", "archive", "tar.gz"),
+        ("windows-x86_64", "install.ps1", "script", "ps1"),
     ];
     let mut files = Vec::new();
     for (target, name, kind, format) in variants {
@@ -307,6 +308,10 @@ async fn universal_artifact_types_share_one_release_and_keep_original_bytes_with
             "0.5.0"
         );
         assert_eq!(
+            doc["latest_by_type"]["script"]["windows-x86_64"]["artifacts"][0]["purpose"],
+            "script"
+        );
+        assert_eq!(
             doc["latest_by_target"]["windows-x86_64"]["artifacts"][0]["purpose"],
             "installer"
         );
@@ -318,7 +323,7 @@ async fn universal_artifact_types_share_one_release_and_keep_original_bytes_with
     .await;
     assert_eq!(
         history["items"][0]["artifacts"].as_array().unwrap().len(),
-        5
+        variants.len()
     );
     // Adding an ordinary executable to a published release requires neither kind of signature.
     t.upload_type(&r, "darwin-aarch64", "mockport-macos", "executable")
@@ -503,6 +508,17 @@ async fn artifact_type_edits_keep_authorization_conflicts_and_published_immutabi
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(json_body(response).await["distribution_role"], "archive");
+    let response = t
+        .admin(
+            "PUT",
+            &path,
+            json!({"distribution_role":"script"}),
+            Some(&t.token),
+            true,
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(json_body(response).await["distribution_role"], "script");
     t.publish(&r).await;
     assert_eq!(
         t.admin(

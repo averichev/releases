@@ -586,11 +586,20 @@ async fn artifact_types_migration_preserves_published_files_signatures_and_guard
     sqlx::query("INSERT INTO releases(id,application_id,version,version_key,created_at,updated_at) VALUES(?,?,'0.5.0','0.5.0',1,1)")
         .bind(&release).bind(&app).execute(&pool).await.unwrap();
     std::fs::create_dir(&config.storage.directory).unwrap();
-    for (target, name, role, updater, standalone) in [
-        ("windows-x86_64", "setup.exe", "installer", None, None),
+    for (target, name, format, role, updater, standalone) in [
+        (
+            "windows-x86_64",
+            "setup.exe",
+            "exe",
+            "installer",
+            None,
+            None,
+        ),
+        ("linux-x86_64", "install.sh", "sh", "installer", None, None),
         (
             "windows-x86_64",
             "update.exe",
+            "exe",
             "updater",
             Some("preserved-tauri-signature"),
             None,
@@ -598,14 +607,15 @@ async fn artifact_types_migration_preserves_published_files_signatures_and_guard
         (
             "windows-aarch64",
             "signed.exe",
+            "exe",
             "installer",
             None,
             Some("preserved-standalone-jws"),
         ),
     ] {
         let key = format!("{}.blob", uuid::Uuid::new_v4().simple());
-        sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature,standalone_signature) VALUES(?,?,?,?,'exe',3,?,?,1,?,?,?)")
-            .bind(uuid::Uuid::new_v4().to_string()).bind(&release).bind(name).bind(target)
+        sqlx::query("INSERT INTO artifacts(id,release_id,filename,target,file_type,size_bytes,sha256,storage_key,created_at,distribution_role,updater_signature,standalone_signature) VALUES(?,?,?,?,?,3,?,?,1,?,?,?)")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&release).bind(name).bind(target).bind(format)
             .bind("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad").bind(&key).bind(role).bind(updater).bind(standalone)
             .execute(&pool).await.unwrap();
         std::fs::write(config.storage.directory.join(key), b"abc").unwrap();

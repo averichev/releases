@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import ArtifactUploader from './ArtifactUploader';
 import type { Artifact } from '../api/releases';
 
-const options = { targets: ['windows-x86_64', 'linux-x86_64', 'linux-aarch64', 'darwin-aarch64', 'darwin-universal', 'any'], file_types: ['exe', 'bin', 'x86_64', 'tar.gz'], max_file_bytes: 1024, upload_idle_seconds: 120 };
+const options = { targets: ['windows', 'windows-x86_64', 'linux', 'linux-x86_64', 'linux-aarch64', 'darwin', 'darwin-aarch64', 'darwin-universal', 'any'], file_types: ['exe', 'bin', 'x86_64', 'tar.gz', 'sh', 'ps1'], max_file_bytes: 1024, upload_idle_seconds: 120 };
 const existing = { download_count: 0, id: 'installer', release_id: 'release', filename: 'installer.exe', target: 'windows-x86_64', file_type: 'exe', distribution_role: 'installer' as const, signature_present: false, size_bytes: 3, sha256: 'a'.repeat(64), created_at: 1 };
 const configured = {application_id: 'app', product_id: '00000000-0000-4000-8000-000000000001', public_key: '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo', key_id: 'key-id', product_id_locked: false, public_key_locked: false};
 beforeEach(() => vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify(configured))))));
@@ -15,7 +15,7 @@ async function select(name: string, label: string) {
 async function choose(kind: string, os = 'Windows', target = os === 'Linux' ? 'linux-x86_64' : 'windows-x86_64') {
   await select('Тип артефакта', kind);
   await select('Операционная система', os);
-  if (os !== 'Любая ОС') await select('Архитектура', target);
+  if (os !== 'Любая ОС') await select('Архитектура', target.includes('-') ? target : 'Любая архитектура');
 }
 function chooseFile(filename: string) {
   fireEvent.change(document.querySelector('input[type="file"]')!, {target: {files: [new File(['new'], filename)]}});
@@ -39,7 +39,7 @@ it('reveals OS, architecture and files in order without assuming a platform', as
   renderUploader([]);
   expect(screen.queryByRole('combobox', {name: 'Операционная система'})).toBeNull();
   expect(document.querySelector('input[type="file"]')).toBeNull();
-  await select('Тип артефакта', 'Установочный файл');
+  await select('Тип артефакта', 'Установочный пакет');
   expect(screen.queryByRole('combobox', {name: 'Архитектура'})).toBeNull();
   await select('Операционная система', 'Linux');
   expect(document.querySelector('input[type="file"]')).toBeNull();
@@ -60,7 +60,7 @@ it('explains a proxy upload limit and keeps the selected file for retry', async 
   }
   vi.stubGlobal('XMLHttpRequest', RejectedXhr);
   const {onChange, onBusy} = renderUploader([]);
-  await choose('Установочный файл', 'Linux'); chooseFile('new.deb');
+  await choose('Установочный пакет', 'Linux'); chooseFile('new.deb');
   await screen.findByText('new.deb · 3 B · DEB');
   fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
   expect((await screen.findByRole('alert')).textContent).toMatch(/HTTP 413.*лимит прокси/);
@@ -72,7 +72,7 @@ it('explains a proxy upload limit and keeps the selected file for retry', async 
 
 it.each(['darwin-aarch64', 'darwin-universal'])('shows the canonical macOS build identifier %s and sends it unchanged', async (target) => {
   const sent = acceptedUpload(); renderUploader([]);
-  await choose('Установочный файл', 'macOS (darwin)', target); chooseFile(`product-1.0.0-${target}.dmg`);
+  await choose('Установочный пакет', 'macOS (darwin)', target); chooseFile(`product-1.0.0-${target}.dmg`);
   fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
   await screen.findByText('Файл загружен и сохранён.');
   expect(sent()?.get('target')).toBe(target);
@@ -92,6 +92,15 @@ it('requires the Tauri signature in the same upload even on a draft', async () =
   expect((sent()?.get('signature') as File).name).toBe('updater.exe.sig');
   expect(sent()?.has('standalone_signature')).toBe(false);
   expect(onChange).toHaveBeenCalledOnce();
+});
+
+it.each(['Пакет обновления', 'Пакет обновления Tauri'])('offers only supported architectures for %s', async (kind) => {
+  renderUploader([]);
+  await select('Тип артефакта', kind);
+  await select('Операционная система', 'Linux');
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Архитектура'}));
+  expect(await screen.findByText('linux-x86_64', {selector: '.ant-select-item-option-content'})).toBeDefined();
+  expect(screen.queryByText('Любая архитектура', {selector: '.ant-select-item-option-content'})).toBeNull();
 });
 
 it('accepts AppImage for Linux Tauri and explains why DEB cannot be used', async () => {
@@ -116,7 +125,7 @@ it.each(['artifact_exists', 'updater_signature_required', 'invalid_standalone'])
     open() {} setRequestHeader() {} send() { this.onload?.(); }
   }
   vi.stubGlobal('XMLHttpRequest', RejectedXhr); renderUploader([]);
-  await choose('Установочный файл'); chooseFile('setup.exe');
+  await choose('Установочный пакет'); chooseFile('setup.exe');
   fireEvent.click(screen.getByRole('button', {name: 'Загрузить файл'}));
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toMatch(code === 'artifact_exists' ? /типом уже есть/ : code === 'invalid_standalone' ? /подпись .jws/ : /корректный файл .sig/);
@@ -146,7 +155,10 @@ it.each([
   ['Исполняемый файл', 'executable', 'program.exe', 'Windows', 'windows-x86_64'],
   ['Исполняемый файл', 'executable', 'program-0.7.0-linux-x86_64', 'Linux', 'linux-x86_64'],
   ['Исполняемый файл', 'executable', 'program.x86_64', 'Linux', 'linux-x86_64'],
-  ['Установочный файл', 'installer', 'setup.exe', 'Windows', 'windows-x86_64'],
+  ['Установочный пакет', 'installer', 'setup.exe', 'Windows', 'windows-x86_64'],
+  ['Установочный скрипт', 'script', 'install.sh', 'Linux', 'linux'],
+  ['Установочный скрипт', 'script', 'install.sh', 'macOS (darwin)', 'darwin'],
+  ['Установочный скрипт', 'script', 'install.ps1', 'Windows', 'windows'],
   ['Архив', 'archive', 'program.tar.gz', 'Любая ОС', 'any'],
 ])('uploads %s %s %s as one file', async (kind, role, filename, os, target) => {
   const sent = acceptedUpload(); renderUploader([], true);

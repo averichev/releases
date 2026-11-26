@@ -24,7 +24,7 @@ UUID id; application_id → applications, RESTRICT; version и version_key (бе
 
 ## artifacts
 
-UUID id; release_id → releases, CASCADE для удаляемых черновиков; filename (метаданные); target; file_type; size_bytes>0; sha256 (64 lowercase hex); уникальный непрозрачный storage_key; created_at; distribution_role `executable|installer|updater|archive` (default installer); nullable updater_signature (до 16384 символов, только updater).
+UUID id; release_id → releases, CASCADE для удаляемых черновиков; filename (метаданные); target; file_type; size_bytes>0; sha256 (64 lowercase hex); уникальный непрозрачный storage_key; created_at; distribution_role `executable|installer|script|updater|archive` (default installer); nullable updater_signature (до 16384 символов, только updater).
 
 UNIQUE(release_id,target,file_type,distribution_role). Частичный UNIQUE(release_id,target) WHERE distribution_role='updater' разрешает максимум один updater на платформу независимо от формата. Базовые поля неизменны даже у draft; заменяют файл удалением/новой загрузкой. У draft сервис позволяет менять роль/подпись с увеличением revision родителя. У published разрешён INSERT нового файла; UPDATE/DELETE существующих запрещены. Отдельный BEFORE INSERT не допускает замену опубликованного объекта через INSERT OR REPLACE, а новый published updater требует непустую подпись. Структура подписи и совместимость формата проверяются сервисом. Диск обслуживается только через ArtifactStorage. DB-транзакция не считается атомарной с файловой системой.
 
@@ -64,4 +64,6 @@ DownloadEvent не создаётся. Публичные URL не сохран�
 
 Перестраивается только artifacts при включённых FK. Все UUID, release_id, filename, target, file_type, размеры, SHA-256, storage_key, timestamps и обе подписи копируются без изменения; физические файлы не затрагиваются. Восстанавливаются индексы, запрет UPDATE/DELETE опубликованных объектов, защита от REPLACE, требования Tauri и существующие standalone guards. Уникальность остаётся `(release_id,target,file_type,distribution_role)` плюс один Tauri updater на release/target. Поэтому Windows EXE executable и installer одной версии не конфликтуют, а два executable одного target/формата отклоняются.
 
-Классификация executable не включает автоматически существующий механизм подписанных standalone-обновлений. Старые standalone installer и их JWS/ключи сохраняются; обычный executable публикуется без подписи и ключей. PublicDistribution фильтрует latest по target/типу/формату до выбора SemVer; старый installer latest и latest_by_target совместимы. Каталог и manifest v2 дополнены latest_by_type для ручного скачивания executable/installer/archive.
+Классификация executable не включает автоматически существующий механизм подписанных standalone-обновлений. Старые standalone installer и их JWS/ключи сохраняются; обычный executable публикуется без подписи и ключей. PublicDistribution фильтрует latest по target/типу/формату до выбора SemVer; старый installer latest и latest_by_target совместимы. Каталог и manifest v2 содержат latest_by_type для каждого типа ручного скачивания.
+
+Миграция `0017_script_artifacts.sql` добавляет значение `script` в `distribution_role`. Она сохраняет существующий тип каждого файла, включая ранее опубликованные .sh и .ps1 с типом `installer`, обе подписи и счётчики скачиваний.

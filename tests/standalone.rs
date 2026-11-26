@@ -1680,7 +1680,15 @@ async fn api_parameters_privacy_admin_csrf_and_live_authorization() {
             .status();
         assert!(status == 400 || status == 422);
     }
-    for target in ["any", "darwin-universal", "macos-arm64", "unknown"] {
+    for target in [
+        "linux",
+        "darwin",
+        "windows",
+        "any",
+        "darwin-universal",
+        "macos-arm64",
+        "unknown",
+    ] {
         assert_eq!(t.update(target, "0.1.0").await.status(), 422);
     }
     assert_eq!(

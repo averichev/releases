@@ -10,7 +10,7 @@ export const sections = [
   { path: 'releases', title: 'Релизы', icon: <RocketOutlined />,
     description: 'Черновики и опубликованные версии в карточках приложений.' },
   { path: 'artifacts', title: 'Дистрибутивы', icon: <CloudDownloadOutlined />,
-    description: 'Установщики и контрольные суммы внутри релизов.' },
+    description: 'Файлы релизов и их контрольные суммы.' },
 
   { path: 'users', title: 'Пользователи', icon: <TeamOutlined />,
     description: 'Участники команды и права доступа к управлению сервисом.' },

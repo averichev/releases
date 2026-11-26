@@ -7,10 +7,11 @@ export interface Release {
 }
 export interface ReleaseValues { version: string; title?: string; release_notes: string }
 export interface ReleasePage { items: Release[]; total: number; page: number; per_page: number }
-export type ArtifactType = 'executable' | 'installer' | 'updater' | 'archive';
+export type ArtifactType = 'executable' | 'installer' | 'script' | 'updater' | 'archive';
 export const artifactTypes: {value: ArtifactType; label: string; description: string}[] = [
+  { value: 'installer', label: 'Установочный пакет', description: 'Готовый установщик приложения, например Setup EXE, MSI, DMG, DEB или RPM.' },
+  { value: 'script', label: 'Установочный скрипт', description: 'Скрипт установки, например .sh или .ps1. Выберите ОС, для которой он предназначен.' },
   { value: 'executable', label: 'Исполняемый файл', description: 'Самостоятельное приложение: EXE, ELF или Mach-O. Для ручного скачивания подпись не нужна.' },
-  { value: 'installer', label: 'Установочный пакет', description: 'Устанавливает приложение: Setup EXE, MSI, DMG, DEB или RPM.' },
   { value: 'updater', label: 'Пакет обновления (Tauri Updater)', description: 'Для Tauri Updater. Подпись .sig нужна для автоматического обновления и добавления в опубликованный релиз.' },
   { value: 'archive', label: 'Архив', description: 'ZIP, TAR.GZ или другой архив с файлами приложения.' },
 ];
@@ -30,7 +31,13 @@ export function size(bytes: number) {
   const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
   return `${(bytes / 1024 ** unit).toLocaleString('ru-RU', { maximumFractionDigits: unit ? 2 : 0 })} ${['B', 'KiB', 'MiB', 'GiB'][unit]}`;
 }
-export const targetName = (value: string) => ({ 'windows-x86_64': 'Windows x64', 'windows-aarch64': 'Windows ARM64', 'linux-x86_64': 'Linux x64', 'linux-aarch64': 'Linux ARM64', 'darwin-x86_64': 'macOS x64', 'darwin-aarch64': 'macOS ARM64', 'darwin-universal': 'macOS Universal (Intel + Apple Silicon)', any: 'Любая платформа' })[value] ?? value;
+export const targetOs = (target: string) => target.split('-', 1)[0] ?? target;
+export const targetName = (value: string) => ({
+  windows: 'Windows', 'windows-x86_64': 'Windows x64', 'windows-aarch64': 'Windows ARM64',
+  linux: 'Linux', 'linux-x86_64': 'Linux x64', 'linux-aarch64': 'Linux ARM64',
+  darwin: 'macOS', 'darwin-x86_64': 'macOS x64', 'darwin-aarch64': 'macOS ARM64',
+  'darwin-universal': 'macOS Universal (Intel + Apple Silicon)', any: 'Любая платформа',
+})[value] ?? value;
 // Backend remains authoritative, including u64 bounds of numeric components.
 export const validVersion = (value: string) => /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value.trim()) && value.trim().length <= 201;
 export function detectedType(filename: string, target?: string) {

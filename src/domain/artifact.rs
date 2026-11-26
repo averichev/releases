@@ -1,19 +1,22 @@
 /// Extend this list in one place; the administrative UI obtains it from the API.
 pub const TARGETS: &[&str] = &[
+    "windows",
     "windows-x86_64",
     "windows-aarch64",
+    "linux",
     "linux-x86_64",
     "linux-aarch64",
+    "darwin",
     "darwin-x86_64",
     "darwin-aarch64",
     "darwin-universal",
     "any",
 ];
 pub const FILE_TYPES: &[&str] = &[
-    "exe", "msi", "bin", "x86_64", "zip", "tar.gz", "dmg", "appimage", "deb", "rpm",
+    "exe", "msi", "bin", "x86_64", "zip", "tar.gz", "dmg", "appimage", "deb", "rpm", "sh", "ps1",
 ];
 // Keep the existing updater code and API field: this is the artifact's single classification.
-pub const ARTIFACT_TYPES: &[&str] = &["executable", "installer", "updater", "archive"];
+pub const ARTIFACT_TYPES: &[&str] = &["executable", "installer", "script", "updater", "archive"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Artifact {
@@ -39,11 +42,11 @@ pub struct UploadMetadata {
 }
 impl UploadMetadata {
     pub fn file_type(&self) -> Option<String> {
-        // A canonical platform suffix is part of a binary's name, not an
+        // A canonical platform suffix is part of a download's name, not an
         // extension after a version dot: product-1.2.0-linux-x86_64 is extensionless.
         if matches!(
             self.distribution_role.as_deref(),
-            None | Some("executable" | "installer")
+            None | Some("executable" | "installer" | "script")
         ) && self.target != "any"
             && TARGETS.contains(&self.target.as_str())
             && self

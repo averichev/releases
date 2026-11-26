@@ -390,12 +390,21 @@ async fn release_lifecycle_uniqueness_sort_search_and_archival() {
     app.call("GET", &path, Value::Null, 404).await;
 }
 #[tokio::test]
-async fn macos_universal_and_linux_x86_64_are_offered_and_accepted_for_upload() {
+async fn advertised_platforms_and_formats_are_accepted_for_upload() {
     let app = TestApp::new().await;
     let options = app
         .call("GET", "/api/v1/admin/artifact-options", Value::Null, 200)
         .await;
+    assert!(
+        options["artifact_types"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("script"))
+    );
     for (target, filename, file_type) in [
+        ("linux", "install.sh", "sh"),
+        ("darwin", "install.sh", "sh"),
+        ("windows", "install.ps1", "ps1"),
         ("darwin-universal", "installer.dmg", "dmg"),
         ("linux-x86_64", "program.x86_64", "x86_64"),
         ("linux-x86_64", "program-1.2.0-linux-x86_64", "bin"),
