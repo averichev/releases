@@ -12,9 +12,6 @@ a { color: #236b54; }
 .sidebar .ant-menu { border: 0; padding: 0 12px; }
 .sidebar .ant-menu-item { margin-block: 5px; height: 43px; line-height: 43px; }
 .sidebar .ant-menu-item-selected { background: #eaf2ec; }
-.sidebar-note { margin: auto 24px 27px; padding-top: 20px; border-top: 1px solid #edf0ec; font-size: 12px; color: #606e67; }
-.sidebar-note > span:last-child { display: block; margin: 5px 0 0 16px; color: #929b96; font-size: 11px; }
-.status-dot { display: inline-block; width: 6px; height: 6px; background: #7b9986; border-radius: 50%; margin-right: 10px; }
 .main-layout { min-width: 0; background: #f5f7f5; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 74px; padding: 0 40px; background: #fff; border-bottom: 1px solid #e7ebe8; color: #818b86; font-size: 12px; }
 .topbar strong { color: #3f5047; font-weight: 500; }

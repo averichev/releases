@@ -46,7 +46,6 @@ function AdminLayout() {
             { key: 'profile', icon: <UserOutlined />, label: <Link to="/admin/profile">Профиль</Link> },
           ]} />
         </nav>
-        <div className="sidebar-note"><span className="status-dot" />Защищённый доступ<span>Этап 06</span></div>
       </Layout.Sider>
       <Layout className="main-layout">
         <Layout.Header className="topbar">
