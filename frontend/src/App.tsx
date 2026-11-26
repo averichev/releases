@@ -19,6 +19,7 @@ const PublicApplications = lazy(() => import('./pages/PublicApplications'));
 const Users = lazy(() => import('./pages/Users'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Overview = lazy(() => import('./pages/Overview'));
+const ServiceUpdate = lazy(() => import('./pages/ServiceUpdate'));
 const Applications = lazy(() => import('./pages/Applications'));
 const ApplicationCreate = lazy(() => import('./pages/ApplicationCreate'));
 const ReleaseDetail = lazy(() => import('./pages/ReleaseDetail'));
@@ -27,7 +28,7 @@ const ApplicationDetail = lazy(() => import('./pages/ApplicationDetail'));
 function AdminLayout() {
   const { pathname } = useLocation();
   const { state } = useAuth();
-  const visibleSections = sections.filter((s) => s.path !== 'users' || (state.kind === 'ready' && state.user.role === 'admin'));
+  const visibleSections = sections.filter((s) => !['users', 'self-update'].includes(s.path) || (state.kind === 'ready' && state.user.role === 'admin'));
   const current = sections.find((section) => pathname.startsWith(`/admin/${section.path}`));
   return (
     <Layout className="app-layout">
@@ -80,12 +81,13 @@ export function AppRoutes() {
     <Route path="/admin" element={<AdminLayout />}>
       <Route index element={<Suspense fallback={<Spin aria-label="Загрузка обзора" />}><Overview /></Suspense>} />
       <Route path="users" element={<Suspense fallback={<Spin />}><Users /></Suspense>} />
+      <Route path="self-update" element={<Suspense fallback={<Spin />}><ServiceUpdate /></Suspense>} />
       <Route path="profile" element={<Suspense fallback={<Spin />}><Profile /></Suspense>} />
       <Route path="applications" element={<Suspense fallback={<Spin />}><Applications /></Suspense>} />
       <Route path="applications/new" element={<Suspense fallback={<Spin />}><ApplicationCreate /></Suspense>} />
       <Route path="applications/:id/releases/:releaseId" element={<Suspense fallback={<Spin />}><ReleaseDetail /></Suspense>} />
       {['applications/:id', 'applications/:id/settings', 'applications/:id/releases', 'applications/:id/manifests', 'applications/:id/history', 'applications/:id/distribution', 'applications/:id/integrations/tauri'].map((path) => <Route key={path} path={path} element={<Suspense fallback={<Spin />}><ApplicationDetail /></Suspense>} />)}
-      {sections.filter((s) => s.path !== 'users' && s.path !== 'applications').map((section) => <Route key={section.path} path={section.path} element={<Placeholder title={section.title} description={section.description} />} />)}
+      {sections.filter((s) => !['users', 'applications', 'self-update'].includes(s.path)).map((section) => <Route key={section.path} path={section.path} element={<Placeholder title={section.title} description={section.description} />} />)}
       <Route path="*" element={<Result status="404" title="Страница не найдена" extra={<Link to="/admin">Вернуться к обзору</Link>} />} />
     </Route>
     </Route>

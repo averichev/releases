@@ -13,6 +13,7 @@ mod icons;
 mod origin;
 mod publication;
 mod releases;
+mod self_update;
 mod standalone;
 mod tauri_integration;
 mod upload_body;
@@ -38,6 +39,7 @@ use error::ApiError;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub service_updates: crate::services::self_update::ServiceUpdates,
     pub api_tokens: crate::services::api_tokens::ApiTokens,
     pub api_publishing: crate::services::api_publishing::ApiPublishing,
     pub server_bind: std::net::SocketAddr,
@@ -83,6 +85,8 @@ pub fn router(state: AppState) -> Router {
                 .expose_headers([header::ETAG]),
         );
     let public = Router::new().route("/health", get(health::get));
+    #[cfg(target_os = "linux")]
+    let public = public.route("/health/self-update", get(health::update_readiness));
     let v1 = public
         .nest("/auth", auth::router())
         .merge(api_publish::router(&state))

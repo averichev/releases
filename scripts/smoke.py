@@ -30,7 +30,7 @@ def main():
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         base = f"http://127.0.0.1:{port}"
-        environment = {key: value for key, value in os.environ.items() if key != "CONFIG" and not key.startswith(("VERUNA_", "SERVER__", "DATABASE__", "STORAGE__", "LOGGING__", "AUTH__", "DOWNLOAD__"))}
+        environment = {key: value for key, value in os.environ.items() if key != "CONFIG" and not key.startswith(("VERUNA_", "SERVER__", "DATABASE__", "STORAGE__", "LOGGING__", "AUTH__", "DOWNLOAD__", "SELF_UPDATE__"))}
         environment.update({
             "SERVER__BIND": f"127.0.0.1:{port}",
             "SERVER__OPEN_BROWSER": "false",

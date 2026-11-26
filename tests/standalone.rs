@@ -455,6 +455,20 @@ async fn signed_executables_use_canonical_target_independently_of_filename_forma
         "0.7.0"
     );
     assert_eq!(manifest["latest_by_target"], json!({}));
+    let descriptor = body(t.update("linux-x86_64", "0.6.0").await).await;
+    for artifacts in [
+        &manifest["latest_by_type"]["executable"]["linux-x86_64"]["artifacts"],
+        &manifest["releases"][0]["artifacts"],
+    ] {
+        let linux = artifacts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["target"] == "linux-x86_64")
+            .unwrap();
+        assert_eq!(linux["signed_metadata"], descriptor["signed_metadata"]);
+        assert_eq!(linux["download_url"], descriptor["url"]);
+    }
     t.assert_storage_count(4).await;
 }
 
@@ -1439,7 +1453,7 @@ async fn three_signed_installers_sparse_platforms_semver_and_manifest_remain_com
     );
     assert!(
         manifest["releases"][0]["artifacts"][0]
-            .get("standalone_signature")
+            .get("signed_metadata")
             .is_none()
     );
     assert_eq!(

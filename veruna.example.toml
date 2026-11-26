@@ -40,3 +40,9 @@ invitation_ttl_seconds = 86400
 public_base_url = ""
 delivery_mode = "direct" # nginx requires deploy/nginx/veruna.conf
 max_concurrent_downloads = 64
+
+# Обновления самого Veruna Releases. Без секции проверка источника выключена.
+# [self_update]
+# manifest_url = "https://updates.example.org/releases/manifest.json"
+# mode = "external" # только проверка; для установки на Linux: supervisor или standalone
+# directory = "/var/lib/veruna-releases/updates" # отдельный приватный каталог для установки

@@ -6,6 +6,7 @@ pub mod api_tokens;
 pub mod applications;
 pub mod auth;
 pub mod error;
+pub mod self_update;
 pub mod sessions;
 pub mod users;
 

@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
+    #[error(transparent)]
+    SelfUpdate(#[from] standalone_updater::UpdateError),
     #[error("At most two active publication tokens are allowed")]
     ApiTokenLimit,
     #[error("Invalid standalone product identity, metadata, signature, key or platform")]

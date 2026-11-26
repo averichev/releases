@@ -163,6 +163,159 @@ fn user_path(session: &Session, action: &str) -> String {
 }
 
 #[tokio::test]
+async fn self_update_is_admin_only_and_rechecks_the_session_before_dispatch() {
+    use veruna_releases::services::self_update::Action;
+    let app = TestApp::new().await;
+    app.bootstrap().await;
+    let admin = app.login("admin", PASSWORD).await;
+    let invite = app.invite(&admin, "reader", "operator").await;
+    assert_eq!(app.activate(&invite).await.status(), 204);
+    let reader = app.login("reader", PASSWORD).await;
+    let base = "/api/v1/admin/self-update";
+    for (suffix, payload) in [
+        ("", Value::Null),
+        ("/check", json!({})),
+        ("/prepare", json!({"check_id":"x","version":"1.0.0"})),
+        ("/install", json!({"operation_id":"x"})),
+        ("/cancel", json!({"operation_id":"x"})),
+    ] {
+        let method = if suffix.is_empty() { "GET" } else { "POST" };
+        let path = format!("{base}{suffix}");
+        assert_eq!(
+            app.send(method, &path, payload.clone(), None)
+                .await
+                .status(),
+            401
+        );
+        assert_eq!(
+            app.send(method, &path, payload.clone(), Some(&reader))
+                .await
+                .status(),
+            403
+        );
+        if method == "POST" {
+            assert_eq!(
+                app.custom(
+                    method,
+                    &path,
+                    payload.clone(),
+                    Some(&admin),
+                    Some(ORIGIN),
+                    true,
+                    false
+                )
+                .await
+                .status(),
+                403
+            );
+            assert_eq!(
+                app.custom(
+                    method,
+                    &path,
+                    payload.clone(),
+                    Some(&admin),
+                    Some("https://other.test"),
+                    true,
+                    true
+                )
+                .await
+                .status(),
+                403
+            );
+            assert_eq!(
+                app.send(method, &path, payload, Some(&admin))
+                    .await
+                    .status(),
+                409
+            );
+        } else {
+            let response = app.send(method, &path, payload, Some(&admin)).await;
+            assert_eq!(response.headers()["cache-control"], "no-store");
+            let summary = body(response).await;
+            assert!(summary["mode"].is_null() && summary["status"].is_null());
+        }
+    }
+    let identity = app
+        .state
+        .sessions
+        .authenticate(admin.cookie.split_once('=').unwrap().1)
+        .await
+        .unwrap();
+    app.state.sessions.logout(&identity).await.unwrap();
+    assert!(matches!(
+        app.state
+            .service_updates
+            .execute(&app.state.sessions, &identity, Action::Check)
+            .await,
+        Err(ServiceError::Unauthorized)
+    ));
+}
+
+#[tokio::test]
+async fn external_update_checks_only_the_manifest_and_never_installs() {
+    use veruna_releases::{
+        config::{SelfUpdateConfig, SelfUpdateMode},
+        infrastructure::self_update,
+    };
+    let mut app = TestApp::new().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (requests, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let remote = Router::new().fallback(axum::routing::get(move |uri: axum::http::Uri| {
+        requests.send(uri.to_string()).unwrap();
+        async { axum::Json(json!({"schema_version": 2, "releases": []})) }
+    }));
+    let source_server = tokio::spawn(async move { axum::serve(listener, remote).await.unwrap() });
+    let config = AppConfig {
+        self_update: Some(SelfUpdateConfig {
+            manifest_url: format!("{base}/channel.json?limit=20").parse().unwrap(),
+            mode: SelfUpdateMode::External,
+            directory: None,
+        }),
+        ..Default::default()
+    };
+    app.state.service_updates = self_update::launch(&config, &[]).await.unwrap();
+    app.router = http::router(app.state.clone());
+    app.bootstrap().await;
+    let admin = app.login("admin", PASSWORD).await;
+    let path = "/api/v1/admin/self-update";
+    let started = app
+        .send("POST", &format!("{path}/check"), json!({}), Some(&admin))
+        .await;
+    assert_eq!(started.status(), 202);
+    let id = body(started).await["operation_id"].clone();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let summary = body(app.send("GET", path, Value::Null, Some(&admin)).await).await;
+            assert_eq!(summary["mode"], "external");
+            assert_eq!(summary["installation_supported"], false);
+            if summary["status"]["state"] != "checking" {
+                assert_eq!(summary["status"]["operation_id"], id);
+                assert_eq!(summary["status"]["check_outcome"], "no_update");
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        app.send(
+            "POST",
+            &format!("{path}/install"),
+            json!({"operation_id":id}),
+            Some(&admin)
+        )
+        .await
+        .status(),
+        409
+    );
+    assert_eq!(received.try_recv().unwrap(), "/channel.json?limit=20");
+    assert!(received.try_recv().is_err());
+    source_server.abort();
+}
+
+#[tokio::test]
 async fn bootstrap_is_idempotent_and_serialized() {
     let app = TestApp::new().await;
     let (a, b) = tokio::join!(

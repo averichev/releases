@@ -11,7 +11,41 @@ fn defaults_work_without_a_file() {
     assert!(config.server.open_browser);
     assert!(config.auth.public_origin.is_empty());
     assert!(config.download.public_base_url.is_empty());
+    assert!(config.self_update.is_none());
     assert_eq!(config.database.path.to_str(), Some("data/veruna.sqlite"));
+}
+
+#[test]
+fn update_source_enables_check_only_and_invalid_installation_settings_fail_early() {
+    use veruna_releases::config::SelfUpdateMode;
+    let manifest = "https://updates.example.org/channel/manifest.json";
+    let mut env = HashMap::from([("SELF_UPDATE__MANIFEST_URL".into(), manifest.into())]);
+    let update = AppConfig::from_sources(None, env.clone())
+        .unwrap()
+        .self_update
+        .unwrap();
+    assert_eq!(update.mode, SelfUpdateMode::External);
+    assert_eq!(update.manifest_url.as_str(), manifest);
+    for invalid in [
+        "relative.json",
+        "http://updates.example.org/m",
+        "file:///manifest",
+        "https://user:pass@updates.example.org/m",
+        "https://updates.example.org/m#part",
+    ] {
+        assert!(
+            AppConfig::from_sources(
+                None,
+                HashMap::from([("SELF_UPDATE__MANIFEST_URL".into(), invalid.into())])
+            )
+            .is_err()
+        );
+    }
+    env.insert("SELF_UPDATE__MODE".into(), "supervisor".into());
+    assert!(AppConfig::from_sources(None, env.clone()).is_err());
+    env.insert("SELF_UPDATE__DIRECTORY".into(), "data/updates".into());
+    env.insert("SERVER__BIND".into(), "127.0.0.1:0".into());
+    assert!(AppConfig::from_sources(None, env).is_err());
 }
 
 #[test]

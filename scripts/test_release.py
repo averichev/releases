@@ -1,11 +1,14 @@
 """Exercise version planning and release recovery against disposable real Git repositories."""
 from contextlib import redirect_stdout
+import base64
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 
 import release
@@ -164,6 +167,39 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.run_release(), (output, 0))
         self.assertEqual(before, {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in output.iterdir()})
         self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_signed_release_covers_each_platform_and_detects_damaged_signature_on_retry(self):
+        # Use a disposable issuer so tests never sign fixtures with the publisher's key.
+        with tempfile.TemporaryDirectory() as tmp:
+            issuer = Path(tmp)
+            signer = release.ROOT / "docs/integrations/standalone/example.mjs"
+            subprocess.run(["node", signer, "keygen", issuer / "test"], check=True, capture_output=True)
+            product = str(uuid.uuid4())
+            identity = issuer / "identity.json"
+            identity.write_text(json.dumps({"product_id": product, "public_key": json.loads(
+                (issuer / "test.public.jwk").read_text())}))
+
+            def build(root, name, version, staging):
+                self.fake_build(root, name, version, staging)
+                return release.sign_binaries(release.ROOT, name, version, staging)
+
+            with patch.dict(os.environ, {"RELEASE_SIGNING_KEY": str(issuer / "test.pem"),
+                                         "RELEASE_UPDATE_IDENTITY": str(identity)}):
+                output, _ = self.run_release(build)
+        self.assertTrue(json.loads((output / "release.json").read_text())["signed_updates"])
+        signatures = sorted(output.glob("*.jws"))
+        targets = []
+        for signature in signatures:
+            payload = signature.read_text().strip().split(".")[1]
+            metadata = json.loads(base64.urlsafe_b64decode(payload + "==="))
+            self.assertEqual(metadata["application_id"], product)
+            self.assertEqual(metadata["sha256"], release.checksum(signature.with_suffix("")))
+            targets.append((metadata["os"], metadata["arch"]))
+        self.assertCountEqual(targets, [("darwin", "aarch64"), ("linux", "x86_64"), ("windows", "x86_64")])
+        self.assertEqual(self.run_release(), (output, 0))
+        signatures[0].write_text("damaged")
+        with self.assertRaisesRegex(release.ReleaseError, "суммы"):
+            self.run_release()
 
     def test_failed_platform_does_not_consume_version_or_touch_previous_release(self):
         previous, _ = self.run_release()

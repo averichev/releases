@@ -1,6 +1,9 @@
 //! Protocol documents are built here independently of HTTP transport.
 use crate::{
-    domain::application::{Status, Visibility},
+    domain::{
+        application::{Application, Status, Visibility},
+        standalone,
+    },
     services::{
         distribution::{PublicDistribution, latest_downloads},
         error::{Result, ServiceError},
@@ -33,6 +36,8 @@ pub struct ManifestArtifact {
     pub sha256: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub download_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signed_metadata: Option<String>,
 }
 pub fn rfc3339(timestamp: i64) -> Result<String> {
     chrono::DateTime::from_timestamp(timestamp, 0)
@@ -49,7 +54,7 @@ impl ManifestGeneration {
     }
     async fn document(
         &self,
-        slug: &str,
+        app: &Application,
         release: &crate::domain::release::Release,
         artifacts: &[crate::domain::artifact::Artifact],
         available: bool,
@@ -57,8 +62,18 @@ impl ManifestGeneration {
         let mut files = Vec::new();
         for a in artifacts {
             self.distribution.check_artifact(a).await?;
+            let signature = a
+                .standalone_signature
+                .as_deref()
+                .filter(|_| available && a.distribution_role == "executable");
+            if let Some(jws) = signature {
+                standalone::verify(jws, app, release, a)
+                    .map_err(|_| ServiceError::StandaloneUnavailable)?;
+            }
             files.push(ManifestArtifact {
-                download_url: available.then(|| self.distribution.artifact_url(slug, release, a)),
+                download_url: available
+                    .then(|| self.distribution.artifact_url(&app.slug, release, a)),
+                signed_metadata: signature.map(str::to_owned),
                 id: a.id.clone(),
                 target: a.target.clone(),
                 format: a.file_type.clone(),
@@ -93,8 +108,7 @@ impl ManifestGeneration {
             for (target, (release, artifacts)) in targets {
                 documents.insert(
                     target,
-                    self.document(&app.slug, &release, &artifacts, available)
-                        .await?,
+                    self.document(app, &release, &artifacts, available).await?,
                 );
             }
             if kind == "installer" {
@@ -104,10 +118,7 @@ impl ManifestGeneration {
         }
         let mut releases = Vec::new();
         for (release, artifacts) in catalog.releases.iter().take(limit as usize) {
-            releases.push(
-                self.document(&app.slug, release, artifacts, available)
-                    .await?,
-            );
+            releases.push(self.document(app, release, artifacts, available).await?);
         }
         if public {
             self.distribution.recheck(&app.id).await?;

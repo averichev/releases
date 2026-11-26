@@ -18,6 +18,25 @@ pub struct AppConfig {
     pub logging: LoggingConfig,
     pub auth: AuthConfig,
     pub download: DownloadConfig,
+    pub self_update: Option<SelfUpdateConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelfUpdateConfig {
+    pub manifest_url: url::Url,
+    #[serde(default)]
+    pub mode: SelfUpdateMode,
+    pub directory: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SelfUpdateMode {
+    #[default]
+    External,
+    Supervisor,
+    Standalone,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -180,6 +199,42 @@ impl AppConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(update) = &self.self_update {
+            let url = &update.manifest_url;
+            let loopback = match url.host() {
+                Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+                _ => false,
+            };
+            ensure!(
+                url.has_host()
+                    && url.username().is_empty()
+                    && url.password().is_none()
+                    && url.fragment().is_none()
+                    && url.as_str().len() <= 8192
+                    && (url.scheme() == "https" || url.scheme() == "http" && loopback),
+                "self_update.manifest_url requires HTTPS or numeric loopback HTTP without credentials or fragment"
+            );
+            if update.mode != SelfUpdateMode::External {
+                ensure!(
+                    cfg!(target_os = "linux"),
+                    "Self-installation requires Linux; use self_update.mode=external on this platform"
+                );
+                ensure!(
+                    update
+                        .directory
+                        .as_ref()
+                        .is_some_and(|p| !p.as_os_str().is_empty()),
+                    "Set a private self_update.directory for installation"
+                );
+                let address = self.server.bind;
+                ensure!(
+                    address.port() != 0
+                        && (address.ip().is_loopback() || address.ip().is_unspecified()),
+                    "Self-installation requires a fixed server port reachable on loopback"
+                );
+            }
+        }
         ensure!(
             !self.database.path.as_os_str().is_empty(),
             "database.path must not be empty"
@@ -301,6 +356,7 @@ fn configuration_environment(
             "LOGGING__",
             "AUTH__",
             "DOWNLOAD__",
+            "SELF_UPDATE__",
         ]
         .iter()
         .any(|prefix| name.starts_with(prefix))

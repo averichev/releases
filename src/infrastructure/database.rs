@@ -8,6 +8,24 @@ use sqlx::{
 
 use crate::config::DatabaseConfig;
 
+static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
+#[cfg(target_os = "linux")]
+pub(crate) fn data_compatibility() -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    // Bump the format marker for incompatible persisted changes outside SQLite.
+    hash.update(b"veruna-releases/storage-v1\0");
+    for migration in MIGRATIONS
+        .iter()
+        .filter(|m| m.migration_type.is_up_migration())
+    {
+        hash.update(migration.version.to_be_bytes());
+        hash.update(migration.checksum.as_ref());
+    }
+    format!("{:x}", hash.finalize())
+}
+
 pub async fn connect(config: &DatabaseConfig) -> Result<SqlitePool> {
     if let Some(parent) = config.path.parent().filter(|p| !p.as_os_str().is_empty()) {
         tokio::fs::create_dir_all(parent)
@@ -28,7 +46,7 @@ pub async fn connect(config: &DatabaseConfig) -> Result<SqlitePool> {
         .connect_with(options)
         .await
         .context("Cannot open SQLite database")?;
-    if let Err(error) = sqlx::migrate!("./migrations").run(&pool).await {
+    if let Err(error) = MIGRATIONS.run(&pool).await {
         pool.close().await;
         return Err(error).context("Cannot apply database migrations");
     }

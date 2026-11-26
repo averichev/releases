@@ -18,6 +18,7 @@ use axum::{
 use serde::Deserialize;
 pub fn router(state: AppState) -> Router<AppState> {
     let administrators = Router::new()
+        .merge(super::self_update::router())
         .route("/admin/users", get(list).post(create))
         .route("/admin/users/invitations", post(invite))
         .route("/admin/users/{id}/role", patch(role))

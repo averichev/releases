@@ -62,6 +62,7 @@ pub async fn application_state(
         config.download.clone(),
     );
     Ok(http::AppState {
+        service_updates: services::self_update::ServiceUpdates::Disabled,
         api_tokens: services::api_tokens::ApiTokens::new(
             repositories::api_tokens::ApiTokensRepository::new(database.clone()),
             repositories::applications::ApplicationsRepository::new(database.clone()),

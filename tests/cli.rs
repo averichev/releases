@@ -3,6 +3,29 @@ use std::{
     process::{Command, Stdio},
 };
 use tempfile::tempdir;
+#[cfg(target_os = "linux")]
+#[test]
+fn update_build_info_requires_neither_configuration_nor_business_data() {
+    let dir = tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_veruna-releases"))
+        .env_clear()
+        .env("CONFIG", "missing.toml")
+        .current_dir(dir.path())
+        .arg("--standalone-updater-build-info")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let info: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(info["version"], veruna_releases::VERSION);
+    assert_eq!(
+        info["product_id"],
+        veruna_releases::infrastructure::self_update::PRODUCT_ID
+    );
+    assert_eq!(info["rust_target"], env!("APP_BUILD_TARGET"));
+    assert_eq!(info["self_update_protocol"], 1);
+    assert_eq!(info["data_compatibility"].as_str().unwrap().len(), 64);
+    assert_eq!(dir.path().read_dir().unwrap().count(), 0);
+}
 #[tokio::test]
 async fn bootstrap_and_owner_recovery_are_independent_and_do_not_echo_passwords() {
     let directory = tempdir().unwrap();

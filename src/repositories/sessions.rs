@@ -12,6 +12,9 @@ impl SessionsRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+    pub(crate) async fn write(&self) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+        Ok(self.pool.begin_with("BEGIN IMMEDIATE").await?)
+    }
     pub async fn find(&self, hash: &str, now: i64) -> Result<User> {
         let row: Option<StoredUser> = sqlx::query_as("SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.status='active'")
             .bind(hash).bind(now).fetch_optional(&self.pool).await?;

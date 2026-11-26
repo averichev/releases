@@ -6,6 +6,7 @@ use axum::{
 use serde::Serialize;
 
 pub enum ApiError {
+    SelfUpdate(standalone_updater::UpdateError),
     ApiTokenLimit,
     InvalidStandalone,
     StandaloneVerification(crate::domain::standalone::VerificationError),
@@ -59,6 +60,34 @@ struct ErrorBody {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::SelfUpdate(error) => {
+                use standalone_updater::UpdateError as E;
+                match error {
+                    E::Busy | E::Stale | E::Unsupported(_) => (
+                        StatusCode::CONFLICT,
+                        "self_update_conflict",
+                        "Update state or installation policy does not permit this action",
+                    ),
+                    E::NoSpace => (
+                        StatusCode::INSUFFICIENT_STORAGE,
+                        "storage_full",
+                        "Insufficient disk space",
+                    ),
+                    E::Trust(_) | E::Integrity(_) => (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "self_update_verification",
+                        "Update verification failed",
+                    ),
+                    other => {
+                        tracing::error!(error = %other, "Service update operation failed");
+                        (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "self_update_unavailable",
+                            "Service update unavailable",
+                        )
+                    }
+                }
+            }
             Self::ApiTokenLimit => (
                 StatusCode::CONFLICT,
                 "api_token_limit",

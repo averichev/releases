@@ -22,9 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 HEADER = re.compile(r"([a-z]+)(?:\([^()\r\n]+\))?(!)?: .+")
 TARGETS = (
-    ("aarch64-apple-darwin", "macos-aarch64.tool", "build"),
-    ("x86_64-unknown-linux-musl", "linux-x86_64", "zigbuild"),
-    ("x86_64-pc-windows-gnu", "windows-x86_64.exe", "build"),
+    ("aarch64-apple-darwin", "macos-aarch64.tool", "build", "darwin-aarch64"),
+    ("x86_64-unknown-linux-musl", "linux-x86_64", "zigbuild", "linux-x86_64"),
+    ("x86_64-pc-windows-gnu", "windows-x86_64.exe", "build", "windows-x86_64"),
 )
 
 
@@ -135,7 +135,13 @@ def release_lock(root):
 
 
 def filenames(name, version):
-    return [f"{name}-{version}-{suffix}" for _, suffix, _ in TARGETS]
+    return [f"{name}-{version}-{suffix}" for _, suffix, _, _ in TARGETS]
+
+
+def release_files(name, version, signed):
+    binaries = filenames(name, version)
+    signatures = [filename + ".jws" for filename in binaries] if signed else []
+    return [*binaries, *signatures, "release.json"]
 
 
 def checksum(path):
@@ -151,7 +157,7 @@ def verify_output(output, name, plan):
         if metadata["version"] != plan.version or metadata["commit"] != plan.commit:
             raise ValueError("версия или коммит не совпадают")
         expected = "".join(f"{checksum(output / item)}  {item}\n"
-                           for item in [*filenames(name, plan.version), "release.json"])
+                           for item in release_files(name, plan.version, metadata.get("signed_updates", False)))
         if (output / "SHA256SUMS").read_text() != expected:
             raise ValueError("контрольные суммы не совпадают")
     except (OSError, ValueError, KeyError, TypeError) as error:
@@ -165,6 +171,33 @@ def ensure_tag(root, plan):
             raise ReleaseError(f"Тег {tag} уже указывает на другой коммит.")
     else:
         git(root, "-c", "tag.gpgSign=false", "tag", tag, plan.commit)
+
+
+def sign_binaries(root, name, version, staging):
+    configured = os.environ.get("RELEASE_SIGNING_KEY")
+    key = Path(configured) if configured is not None else Path.home() / ".config/veruna-releases/update-signing.pem"
+    if configured is None and not key.exists():
+        print("Ключ издателя не настроен. Дистрибутивы собраны для ручной установки без .jws.")
+        return False
+    if not key.is_file():
+        raise ReleaseError("Не найден закрытый ключ издателя для подписи релиза.")
+    identity_path = Path(os.environ.get("RELEASE_UPDATE_IDENTITY", "deploy/self-update-identity.json"))
+    identity = json.loads((root / identity_path).read_text())
+    signer = root / "docs/integrations/standalone/example.mjs"
+    with tempfile.TemporaryDirectory() as directory:
+        public = Path(directory) / "public.jwk"
+        public.write_text(json.dumps(identity["public_key"]))
+        for filename, (_, _, _, target) in zip(filenames(name, version), TARGETS, strict=True):
+            binary = staging / filename
+            context = [identity["product_id"], version, target, str(binary)]
+            signature = subprocess.run(["node", signer, "sign", key, *context, "--kid"],
+                                       check=True, capture_output=True).stdout
+            path = staging / (filename + ".jws")
+            with path.open("xb") as output:
+                output.write(signature)
+            subprocess.run(["node", signer, "verify", public, *context, path], check=True,
+                           stdout=subprocess.DEVNULL)
+    return True
 
 
 def build_binaries(root, name, version, staging):
@@ -193,13 +226,13 @@ def build_binaries(root, name, version, staging):
     rustc = run("rustup", "which", "--toolchain", toolchain, "rustc", capture=True)
     environment["RUSTC"] = rustc
     environment["PATH"] = str(Path(rustc).parent) + os.pathsep + environment.get("PATH", "")
-    for target, _, _ in TARGETS:
+    for target, _, _, _ in TARGETS:
         libdir = run("rustup", "run", toolchain, "rustc", "--print", "target-libdir", "--target", target, capture=True)
         if not Path(libdir).is_dir():
             raise ReleaseError(f"Выполните rustup target add --toolchain {toolchain} {target}")
     run("npm", "--prefix", "frontend", "ci")
     run("npm", "--prefix", "frontend", "run", "build")
-    for target, suffix, action in TARGETS:
+    for target, suffix, action, _ in TARGETS:
         target_environment = environment.copy()
         if target == "x86_64-pc-windows-gnu":
             target_environment.update({
@@ -213,6 +246,7 @@ def build_binaries(root, name, version, staging):
         destination = staging / f"{name}-{version}-{suffix}"
         shutil.copyfile(source, destination)
         destination.chmod(0o755)
+    return sign_binaries(root, name, version, staging)
 
 
 def release(root):
@@ -241,15 +275,18 @@ def release(root):
         with tempfile.TemporaryDirectory(prefix=".release-", dir=output.parent) as directory:
             staging = Path(directory) / "complete"
             staging.mkdir()
-            build_binaries(root, name, plan.version, staging)
+            signed = build_binaries(root, name, plan.version, staging)
             require_clean(root)
             if calculate(root) != plan:
                 raise ReleaseError("История Git изменилась во время сборки; релиз не сохранён.")
-            (staging / "release.json").write_text(json.dumps({
+            metadata = {
                 "version": plan.version, "commit": plan.commit,
                 "previous_tag": plan.previous_tag,
-            }, ensure_ascii=False, indent=2) + "\n")
-            files = [*filenames(name, plan.version), "release.json"]
+            }
+            if signed:
+                metadata["signed_updates"] = True
+            (staging / "release.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
+            files = release_files(name, plan.version, signed)
             (staging / "SHA256SUMS").write_text("".join(f"{checksum(staging / item)}  {item}\n" for item in files))
             if output.exists() or output.is_symlink():
                 raise ReleaseError(f"Каталог {output} появился во время сборки и не будет перезаписан.")

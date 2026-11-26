@@ -15,11 +15,12 @@ sha2 = "0.10"
 futures-util = "0.3"
 subtle = "2"
 uuid = { version = "1", features = ["v4"] }
-url = "2"
+url = { version = "2", features = ["serde"] }
 rpassword = "7"
 zeroize = "1"
 axum = { version = "0.8.9", features = ["multipart"] }
 semver = "1"
+standalone-updater = { git = "https://github.com/averichev/standalone-updater.git", rev = "b43612dd7528185877654428520d57098462f8e7", features = ["linux-runtime"] }
 jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto"] }
 ed25519-dalek = { version = "3", default-features = false }
 cap-fs-ext = "3"
@@ -47,7 +48,11 @@ tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
 [build-dependencies]
+base64 = "0.22"
 semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = "1"
 
 [profile.release]
 lto = "thin"

@@ -5,15 +5,27 @@ use tokio::{sync::oneshot, time::timeout};
 use veruna_releases::{
     config::AppConfig,
     http,
-    infrastructure::{logging, shutdown::ShutdownSignal, startup},
+    infrastructure::{logging, self_update, shutdown::ShutdownSignal, startup},
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    if self_update::linux::build_info().handle_cli()? {
+        return Ok(());
+    }
     let mut config = AppConfig::load()?;
-    logging::initialize(&config.logging.filter)?;
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if !arguments.is_empty() {
+    #[cfg(target_os = "linux")]
+    let internal = self_update::linux::internal_role(&arguments);
+    #[cfg(not(target_os = "linux"))]
+    let internal = false;
+    logging::initialize(&config.logging.filter, internal)?;
+    if !arguments.is_empty() && !internal {
+        #[cfg(target_os = "linux")]
+        if arguments[0] == "admin" {
+            self_update::linux::dispatch_admin(&config, &arguments)?;
+        }
         let values: Vec<&str> = arguments.iter().map(String::as_str).collect();
         return match values.as_slice() {
             ["admin", "bootstrap"] => veruna_releases::cli::bootstrap(&config, false).await,
@@ -30,10 +42,22 @@ async fn main() -> Result<()> {
         };
     }
 
+    let updates = self_update::launch(&config, &arguments).await?;
+    #[cfg(target_os = "linux")]
+    if matches!(
+        updates,
+        veruna_releases::services::self_update::ServiceUpdates::Linux(_)
+    ) {
+        config.server.auto_port = false;
+        if std::env::var_os("STANDALONE_UPDATER_RESTART").is_some() {
+            config.server.open_browser = false;
+        }
+    }
     let mut signal = ShutdownSignal::register().context("Cannot register shutdown signals")?;
     let database = veruna_releases::initialize(&config).await?;
     let listener = startup::bind(&mut config).await?;
-    let state = veruna_releases::application_state(database.clone(), &config).await?;
+    let mut state = veruna_releases::application_state(database.clone(), &config).await?;
+    state.service_updates = updates.clone();
     tracing::info!(address = %listener.local_addr()?, version = veruna_releases::VERSION, "Veruna Releases started");
 
     let grace = Duration::from_secs(config.server.shutdown_timeout_seconds);
@@ -59,11 +83,18 @@ async fn main() -> Result<()> {
     };
     tokio::pin!(browser);
     let mut browser_done = false;
+    let shutdown = async {
+        tokio::select! {
+            result = signal.wait() => result,
+            () = updates.shutdown_requested() => Ok(()),
+        }
+    };
+    tokio::pin!(shutdown);
     let result = loop {
         tokio::select! {
             biased;
             result = &mut server => break result.context("HTTP server failed"),
-            signal_result = signal.wait() => {
+            signal_result = &mut shutdown => {
                 tracing::info!("Shutdown requested; draining HTTP requests");
                 let _ = stop.send(());
                 break match timeout(grace, &mut server).await {
@@ -80,5 +111,6 @@ async fn main() -> Result<()> {
         .context("Database shutdown timed out")?;
     result?;
     tracing::info!("Veruna Releases stopped");
+    updates.finish_shutdown()?;
     Ok(())
 }
