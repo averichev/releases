@@ -186,7 +186,7 @@ def sign_binaries(root, name, version, staging):
     signer = root / "docs/integrations/standalone/example.mjs"
     with tempfile.TemporaryDirectory() as directory:
         public = Path(directory) / "public.jwk"
-        public.write_text(json.dumps(identity["public_key"]))
+        public.write_text(json.dumps(identity.get("updates", identity)["public_key"]))
         for filename, (_, _, _, target) in zip(filenames(name, version), TARGETS, strict=True):
             binary = staging / filename
             context = [identity["product_id"], version, target, str(binary)]

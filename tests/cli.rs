@@ -3,6 +3,25 @@ use std::{
     process::{Command, Stdio},
 };
 use tempfile::tempdir;
+
+#[test]
+fn version_prints_the_embedded_release_without_configuration_or_data() {
+    let dir = tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_veruna-releases"))
+        .env_clear()
+        .env("CONFIG", "missing.toml")
+        .current_dir(dir.path())
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        format!("veruna-releases {}", veruna_releases::VERSION)
+    );
+    assert_eq!(dir.path().read_dir().unwrap().count(), 0);
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn update_build_info_requires_neither_configuration_nor_business_data() {

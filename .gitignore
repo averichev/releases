@@ -1,6 +1,7 @@
 /target/
 /scripts/__pycache__/
 /dist/
+/releases/
 /frontend/node_modules/
 /frontend/dist/
 /frontend/*.tsbuildinfo

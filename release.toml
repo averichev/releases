@@ -1,0 +1,4 @@
+[signing]
+identity = "deploy/self-update-identity.json"
+private_key_env = "RELEASE_SIGNING_KEY"
+private_key_file = "~/.config/veruna-releases/update-signing.pem"

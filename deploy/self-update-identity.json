@@ -1,8 +1,10 @@
 {
   "product_id": "791882f1-c3a0-4251-abd2-e6e40fd7f5df",
-  "public_key": {
-    "crv": "Ed25519",
-    "x": "FGmIIrNZQGT8ExrQpMwHH5bbvTrbWpsb6esGwD1lA2g",
-    "kty": "OKP"
+  "updates": {
+    "public_key": {
+      "crv": "Ed25519",
+      "x": "FGmIIrNZQGT8ExrQpMwHH5bbvTrbWpsb6esGwD1lA2g",
+      "kty": "OKP"
+    }
   }
 }

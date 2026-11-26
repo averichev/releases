@@ -10,12 +10,16 @@ use veruna_releases::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments == ["--version"] {
+        println!("{} {}", env!("CARGO_PKG_NAME"), veruna_releases::VERSION);
+        return Ok(());
+    }
     #[cfg(target_os = "linux")]
     if self_update::linux::build_info().handle_cli()? {
         return Ok(());
     }
     let mut config = AppConfig::load()?;
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(target_os = "linux")]
     let internal = self_update::linux::internal_role(&arguments);
     #[cfg(not(target_os = "linux"))]
@@ -38,7 +42,9 @@ async fn main() -> Result<()> {
             ["admin", "reset-password", "--stdin"] => {
                 veruna_releases::cli::reset_password(&config, true).await
             }
-            _ => anyhow::bail!("Usage: veruna-releases [admin bootstrap|reset-password [--stdin]]"),
+            _ => anyhow::bail!(
+                "Usage: veruna-releases [--version | admin <bootstrap|reset-password> [--stdin]]"
+            ),
         };
     }
 
