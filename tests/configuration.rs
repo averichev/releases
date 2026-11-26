@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, path::Path};
 
 use tempfile::tempdir;
 use veruna_releases::config::{AppConfig, SelfUpdateMode};
@@ -14,19 +14,26 @@ fn defaults_work_without_a_file() {
     assert!(config.auth.public_origin.is_empty());
     assert!(config.download.public_base_url.is_empty());
     assert_eq!(config.self_update.manifest_url, OFFICIAL_MANIFEST);
-    assert_eq!(config.self_update.mode, SelfUpdateMode::External);
+    let expected = if cfg!(target_os = "linux") {
+        SelfUpdateMode::Supervisor
+    } else {
+        SelfUpdateMode::External
+    };
+    assert_eq!(config.self_update_mode(), expected);
+    assert_eq!(config.self_update_directory(), Path::new("data/updates"));
     assert_eq!(config.database.path.to_str(), Some("data/veruna.sqlite"));
 }
 
 #[test]
-fn update_source_enables_check_only_and_invalid_installation_settings_fail_early() {
+fn update_source_preserves_the_platform_default_and_invalid_settings_fail_early() {
     let manifest = "https://updates.example.org/channel/manifest.json";
     let mut env = HashMap::from([("SELF_UPDATE__MANIFEST_URL".into(), manifest.into())]);
-    let update = AppConfig::from_sources(None, env.clone())
-        .unwrap()
-        .self_update;
-    assert_eq!(update.mode, SelfUpdateMode::External);
-    assert_eq!(update.manifest_url.as_str(), manifest);
+    let config = AppConfig::from_sources(None, env.clone()).unwrap();
+    assert_eq!(
+        config.self_update_mode(),
+        AppConfig::default().self_update_mode()
+    );
+    assert_eq!(config.self_update.manifest_url, manifest);
     for invalid in [
         "relative.json",
         "http://updates.example.org/m",
@@ -43,10 +50,33 @@ fn update_source_enables_check_only_and_invalid_installation_settings_fail_early
         );
     }
     env.insert("SELF_UPDATE__MODE".into(), "supervisor".into());
-    assert!(AppConfig::from_sources(None, env.clone()).is_err());
-    env.insert("SELF_UPDATE__DIRECTORY".into(), "data/updates".into());
-    env.insert("SERVER__BIND".into(), "127.0.0.1:0".into());
+    assert_eq!(
+        AppConfig::from_sources(None, env.clone()).is_ok(),
+        cfg!(target_os = "linux")
+    );
+    env.insert("SELF_UPDATE__DIRECTORY".into(), String::new());
     assert!(AppConfig::from_sources(None, env).is_err());
+}
+
+#[test]
+fn installation_uses_a_sibling_of_the_database_unless_overridden() {
+    let mut env = HashMap::from([("DATABASE__PATH".into(), "state/db.sqlite".into())]);
+    let config = AppConfig::from_sources(None, env.clone()).unwrap();
+    assert_eq!(config.self_update_directory(), Path::new("state/updates"));
+    env.insert("SELF_UPDATE__DIRECTORY".into(), "private/updater".into());
+    let config = AppConfig::from_sources(None, env).unwrap();
+    assert_eq!(config.self_update_directory(), Path::new("private/updater"));
+}
+
+#[test]
+fn binds_without_a_fixed_loopback_probe_keep_external_updates() {
+    for address in ["127.0.0.1:0", "192.0.2.1:8080"] {
+        let mut env = HashMap::from([("SERVER__BIND".into(), address.into())]);
+        let config = AppConfig::from_sources(None, env.clone()).unwrap();
+        assert_eq!(config.self_update_mode(), SelfUpdateMode::External);
+        env.insert("SELF_UPDATE__MODE".into(), "supervisor".into());
+        assert!(AppConfig::from_sources(None, env).is_err());
+    }
 }
 
 #[tokio::test]
@@ -55,6 +85,7 @@ async fn self_update_manifest_can_be_overridden_or_disabled() {
     let path = dir.path().join("veruna.toml");
     fs::write(&path, "[self_update]\nmode = 'external'\n").unwrap();
     let config = AppConfig::from_sources(Some(&path), HashMap::new()).unwrap();
+    assert_eq!(config.self_update_mode(), SelfUpdateMode::External);
     assert_eq!(config.self_update.manifest_url, OFFICIAL_MANIFEST);
 
     let mirror = "https://mirror.example.org/releases/manifest.json";

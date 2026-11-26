@@ -78,8 +78,9 @@ def scenario(root, old, new, mode, identity_dir):
         address = f"127.0.0.1:{listener.getsockname()[1]}"
     base = "http://" + address
     env = {"PATH": os.environ["PATH"], "SERVER__BIND": address, "SERVER__OPEN_BROWSER": "false",
-           "SELF_UPDATE__MODE": mode, "SELF_UPDATE__DIRECTORY": str(root / "updates"),
            "SELF_UPDATE__MANIFEST_URL": base + "/releases/manifest.json"}
+    if mode is not None:
+        env.update({"SELF_UPDATE__MODE": mode, "SELF_UPDATE__DIRECTORY": str(root / "updates")})
     password = secrets.token_urlsafe(24)
     run(executable, "admin", "bootstrap", "--stdin", cwd=root, env=env, input=f"owner\n{password}\n".encode())
     browser = build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -152,6 +153,10 @@ def scenario(root, old, new, mode, identity_dir):
         else:
             raise AssertionError("Readiness nonce exposed by a proxied request")
         csrf = api("/auth/login", "POST", {"username": "owner", "password": password})["csrf_token"]
+        summary = api(update)
+        assert summary["mode"] == (mode or "supervisor") and summary["installation_supported"], summary
+        if mode is None:
+            assert (root / "data/updates").stat().st_mode & 0o777 == 0o700
         app = api("/admin/applications", "POST", {"slug": "releases", "name": "Releases"})
         app_path = "/admin/applications/" + app["id"]
         api(app_path, "PATCH", {"visibility": "public"})
@@ -170,9 +175,12 @@ def scenario(root, old, new, mode, identity_dir):
         api(update + "/install", "POST", {"operation_id": operation})
         assert stage("completed", operation)["current_version"] == version
         assert api(app_path)["slug"] == "releases" and api("/auth/me")["user"]["username"] == "owner"
-        assert digest(executable) == digest(old if mode == "supervisor" else new)
-        if mode == "supervisor":
+        assert digest(executable) == digest(new if mode == "standalone" else old)
+        if mode != "standalone":
             assert server.poll() is None
+            # Admin commands still reach SQLite when the artifact directory is unavailable.
+            run(executable, "admin", "bootstrap", cwd=root, env=dict(env, STORAGE__DIRECTORY=str(executable)),
+                stdin=subprocess.DEVNULL)
         checked = api(update + "/check", "POST", {})
         assert stage("idle", checked["operation_id"])["status"]["check_outcome"] == "no_update"
         major = int(version.split(".")[0])
@@ -187,7 +195,7 @@ def scenario(root, old, new, mode, identity_dir):
         api(update + "/install", "POST", {"operation_id": operation})
         assert stage("rolled_back", operation)["current_version"] == version
         assert api(app_path)["id"] == app["id"]
-        print(f"{mode}: {initial['version']} -> {version}, incompatible update refused, failed startup rolled back; catalog and session preserved", flush=True)
+        print(f"{mode or 'default'}: {initial['version']} -> {version}, incompatible update refused, failed startup rolled back; catalog and session preserved", flush=True)
     finally:
         try:
             os.killpg(server.pid, signal.SIGTERM)
@@ -207,7 +215,7 @@ if __name__ == "__main__":
     test.add_argument("identity_dir", type=Path)
     test.add_argument("current", type=Path)
     test.add_argument("candidate", type=Path)
-    test.add_argument("--mode", choices=("supervisor", "standalone"), default="supervisor")
+    test.add_argument("--mode", choices=("supervisor", "standalone"))
     args = parser.parse_args()
     if args.command == "init":
         test_identity(args.identity_dir)

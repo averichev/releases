@@ -107,7 +107,9 @@ def main():
             me, _ = call("/api/v1/auth/me")
             assert me["user"]["username"] == "owner" and "password_hash" not in me["user"]
             updates, _ = call("/api/v1/admin/self-update")
-            assert updates["mode"] == "external" and updates["installation_supported"] is False, updates
+            linux = sys.platform == "linux"
+            assert updates["mode"] == ("supervisor" if linux else "external"), updates
+            assert updates["installation_supported"] is linux, updates
             assert updates["status"]["state"] == "idle" and updates["status"]["last_checked"] is None, updates
             call("/api/v1/auth/logout", "POST", expected=403)  # no CSRF
             users, _ = call("/api/v1/admin/users")

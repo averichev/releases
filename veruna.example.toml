@@ -1,7 +1,7 @@
 # Relative paths are resolved against the process working directory.
 [server]
 bind = "127.0.0.1:8080"
-# Automatic fallback only for loopback with automatic/matching origins.
+# Automatic fallback only for loopback with automatic/matching origins and no web installation.
 # For a service behind nginx set auto_port = false.
 auto_port = true
 # Open the local panel after startup. Set false for headless installations.
@@ -41,9 +41,9 @@ public_base_url = ""
 delivery_mode = "direct" # nginx requires deploy/nginx/veruna.conf
 max_concurrent_downloads = 64
 
-# Проверка обновлений Veruna Releases использует официальный манифест по умолчанию.
+# На Linux со стандартным адресом установка из панели работает без этой секции.
 # [self_update]
 # manifest_url = "https://app.releases.veruna.systems/releases/manifest.json"
-# Укажите URL зеркала или пустую строку для отключения проверки в режиме external.
-# mode = "external" # только проверка; для установки на Linux: supervisor или standalone
-# directory = "/var/lib/veruna-releases/updates" # отдельный приватный каталог для установки
+# Для зеркала укажите его URL. Пустой URL отключает проверку при автоматическом выборе режима или в external.
+# mode = "external" # только проверка. По умолчанию на Linux с фиксированным портом на loopback или wildcard используется supervisor.
+# directory = "/var/lib/veruna-releases/updates" # по умолчанию каталог updates рядом с SQLite, обычно data/updates

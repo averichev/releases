@@ -41,7 +41,7 @@ pub async fn launch(config: &AppConfig, arguments: &[String]) -> Result<ServiceU
         return Ok(ServiceUpdates::Disabled);
     };
     let source = source(&manifest_url);
-    if settings.mode == SelfUpdateMode::External {
+    if config.self_update_mode() == SelfUpdateMode::External {
         ensure!(
             arguments.is_empty(),
             "Updater role unavailable in external mode"
@@ -52,8 +52,9 @@ pub async fn launch(config: &AppConfig, arguments: &[String]) -> Result<ServiceU
     #[cfg(target_os = "linux")]
     {
         use standalone_updater::runtime::{self, Launch};
-        let config = linux::runtime_config(config, source)?;
-        match runtime::launch(config).await? {
+        let runtime = linux::runtime_config(config, source)?;
+        linux::check_directory_separation(config, &runtime.updates_directory)?;
+        match runtime::launch(runtime).await? {
             Launch::Exit(code) => std::process::exit(code),
             Launch::Serve(manager) => Ok(ServiceUpdates::Linux(manager)),
         }
@@ -102,22 +103,15 @@ pub mod linux {
             result.push(component);
             match result.symlink_metadata() {
                 Ok(_) => result = result.canonicalize()?,
-                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error)
+                    if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {}
                 Err(error) => return Err(error.into()),
             }
         }
         Ok(result)
     }
 
-    pub(super) fn runtime_config(
-        config: &AppConfig,
-        source: UpdateSource,
-    ) -> Result<RuntimeConfig> {
-        let settings = &config.self_update;
-        let directory = settings
-            .directory
-            .as_deref()
-            .context("Missing self_update.directory")?;
+    pub(super) fn check_directory_separation(config: &AppConfig, directory: &Path) -> Result<()> {
         let updates = resolved(directory)?;
         for path in [
             &config.database.path,
@@ -131,16 +125,23 @@ pub mod linux {
                 "self_update.directory must be separate from release storage and database"
             );
         }
+        Ok(())
+    }
+
+    pub(super) fn runtime_config(
+        config: &AppConfig,
+        source: UpdateSource,
+    ) -> Result<RuntimeConfig> {
         Ok(RuntimeConfig {
             source,
             build: build_info(),
-            mode: match settings.mode {
+            mode: match config.self_update_mode() {
                 SelfUpdateMode::Supervisor => InstallationMode::Supervisor,
                 SelfUpdateMode::Standalone => InstallationMode::Standalone,
                 SelfUpdateMode::External => InstallationMode::External,
             },
             executable: std::env::current_exe()?,
-            updates_directory: directory.to_owned(),
+            updates_directory: config.self_update_directory(),
             // The server currently accepts no application arguments.
             arguments: Vec::new(),
             working_directory: std::env::current_dir()?,
@@ -152,13 +153,15 @@ pub mod linux {
     pub fn dispatch_admin(config: &AppConfig, arguments: &[String]) -> Result<()> {
         use std::os::unix::process::CommandExt;
         let settings = &config.self_update;
-        if settings.mode == SelfUpdateMode::Supervisor
+        if config.self_update_mode() == SelfUpdateMode::Supervisor
             && let Some(manifest_url) = settings.parsed_manifest_url()?
         {
             let runtime = runtime_config(config, source(&manifest_url))?;
+            // The first admin bootstrap needs only SQLite, even if artifact storage is unavailable.
             if let Some(active) = runtime::active_executable(&runtime)?
                 && active != runtime.executable
             {
+                check_directory_separation(config, &runtime.updates_directory)?;
                 return Err(std::process::Command::new(active).args(arguments).exec())
                     .context("Cannot start the active release for this admin command");
             }

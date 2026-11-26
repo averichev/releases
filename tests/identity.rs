@@ -253,7 +253,10 @@ async fn self_update_is_admin_only_and_rechecks_the_session_before_dispatch() {
 
 #[tokio::test]
 async fn external_update_checks_only_the_manifest_and_never_installs() {
-    use veruna_releases::{config::SelfUpdateConfig, infrastructure::self_update};
+    use veruna_releases::{
+        config::{SelfUpdateConfig, SelfUpdateMode},
+        infrastructure::self_update,
+    };
     let mut app = TestApp::new().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -266,6 +269,7 @@ async fn external_update_checks_only_the_manifest_and_never_installs() {
     let config = AppConfig {
         self_update: SelfUpdateConfig {
             manifest_url: format!("{base}/channel.json?limit=20"),
+            mode: Some(SelfUpdateMode::External),
             ..Default::default()
         },
         ..Default::default()

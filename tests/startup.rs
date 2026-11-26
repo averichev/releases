@@ -159,6 +159,7 @@ mod desktop {
                 Command::new(env!("CARGO_BIN_EXE_veruna-releases"))
                     .env_clear()
                     .env("PATH", root)
+                    .env("SELF_UPDATE__MODE", "external")
                     .env("SERVER__BIND", address.to_string())
                     .env("AUTH__PUBLIC_ORIGIN", &origin)
                     .env("DOWNLOAD__PUBLIC_BASE_URL", &origin)

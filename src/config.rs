@@ -25,7 +25,7 @@ pub struct AppConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct SelfUpdateConfig {
     pub manifest_url: String,
-    pub mode: SelfUpdateMode,
+    pub mode: Option<SelfUpdateMode>,
     pub directory: Option<PathBuf>,
 }
 
@@ -33,7 +33,7 @@ impl Default for SelfUpdateConfig {
     fn default() -> Self {
         Self {
             manifest_url: "https://app.releases.veruna.systems/releases/manifest.json".into(),
-            mode: SelfUpdateMode::External,
+            mode: None,
             directory: None,
         }
     }
@@ -43,7 +43,7 @@ impl SelfUpdateConfig {
     pub(crate) fn parsed_manifest_url(&self) -> Result<Option<url::Url>> {
         if self.manifest_url.is_empty() {
             ensure!(
-                self.mode == SelfUpdateMode::External,
+                matches!(self.mode, None | Some(SelfUpdateMode::External)),
                 "Self-installation requires a non-empty self_update.manifest_url"
             );
             return Ok(None);
@@ -68,10 +68,9 @@ impl SelfUpdateConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SelfUpdateMode {
-    #[default]
     External,
     Supervisor,
     Standalone,
@@ -204,6 +203,31 @@ impl Default for LoggingConfig {
 }
 
 impl AppConfig {
+    pub fn self_update_mode(&self) -> SelfUpdateMode {
+        self.self_update.mode.unwrap_or_else(|| {
+            if cfg!(target_os = "linux")
+                && !self.self_update.manifest_url.is_empty()
+                && self.supports_update_readiness()
+            {
+                SelfUpdateMode::Supervisor
+            } else {
+                SelfUpdateMode::External
+            }
+        })
+    }
+
+    fn supports_update_readiness(&self) -> bool {
+        let address = self.server.bind;
+        address.port() != 0 && (address.ip().is_loopback() || address.ip().is_unspecified())
+    }
+
+    pub fn self_update_directory(&self) -> PathBuf {
+        self.self_update
+            .directory
+            .clone()
+            .unwrap_or_else(|| self.database.path.with_file_name("updates"))
+    }
+
     pub fn load() -> Result<Self> {
         let explicit = std::env::var_os("CONFIG").map(PathBuf::from);
         let default_path = Path::new("veruna.toml");
@@ -238,7 +262,9 @@ impl AppConfig {
 
     pub fn validate(&self) -> Result<()> {
         let update = &self.self_update;
-        if update.parsed_manifest_url()?.is_some() && update.mode != SelfUpdateMode::External {
+        if update.parsed_manifest_url()?.is_some()
+            && self.self_update_mode() != SelfUpdateMode::External
+        {
             ensure!(
                 cfg!(target_os = "linux"),
                 "Self-installation requires Linux; use self_update.mode=external on this platform"
@@ -247,13 +273,11 @@ impl AppConfig {
                 update
                     .directory
                     .as_ref()
-                    .is_some_and(|p| !p.as_os_str().is_empty()),
-                "Set a private self_update.directory for installation"
+                    .is_none_or(|p| !p.as_os_str().is_empty()),
+                "self_update.directory must not be empty"
             );
-            let address = self.server.bind;
             ensure!(
-                address.port() != 0
-                    && (address.ip().is_loopback() || address.ip().is_unspecified()),
+                self.supports_update_readiness(),
                 "Self-installation requires a fixed server port reachable on loopback"
             );
         }
