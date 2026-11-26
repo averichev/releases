@@ -3,7 +3,7 @@ use anyhow::{Result, ensure};
 use standalone_updater::{PublicKey, UpdateMonitor, UpdateSource};
 
 use crate::{
-    config::{AppConfig, SelfUpdateConfig, SelfUpdateMode},
+    config::{AppConfig, SelfUpdateMode},
     services::self_update::ServiceUpdates,
 };
 
@@ -17,29 +17,30 @@ pub fn target() -> String {
     format!("{os}-{}", std::env::consts::ARCH)
 }
 
-fn source(settings: &SelfUpdateConfig) -> UpdateSource {
+fn source(manifest_url: &url::Url) -> UpdateSource {
     UpdateSource::from_manifest(
-        settings.manifest_url.as_str(),
+        manifest_url.as_str(),
         PRODUCT_ID,
         PublicKey {
             kty: "OKP".into(),
             crv: "Ed25519".into(),
             x: env!("APP_UPDATE_PUBLIC_KEY").into(),
         },
-        vec![settings.manifest_url.origin().ascii_serialization()],
+        vec![manifest_url.origin().ascii_serialization()],
         256 * 1024 * 1024,
     )
 }
 
 pub async fn launch(config: &AppConfig, arguments: &[String]) -> Result<ServiceUpdates> {
-    let Some(settings) = &config.self_update else {
+    let settings = &config.self_update;
+    let Some(manifest_url) = settings.parsed_manifest_url()? else {
         ensure!(
             arguments.is_empty(),
             "Updater role requires a configured Linux installation"
         );
         return Ok(ServiceUpdates::Disabled);
     };
-    let source = source(settings);
+    let source = source(&manifest_url);
     if settings.mode == SelfUpdateMode::External {
         ensure!(
             arguments.is_empty(),
@@ -51,7 +52,7 @@ pub async fn launch(config: &AppConfig, arguments: &[String]) -> Result<ServiceU
     #[cfg(target_os = "linux")]
     {
         use standalone_updater::runtime::{self, Launch};
-        let config = linux::runtime_config(config, settings, source)?;
+        let config = linux::runtime_config(config, source)?;
         match runtime::launch(config).await? {
             Launch::Exit(code) => std::process::exit(code),
             Launch::Serve(manager) => Ok(ServiceUpdates::Linux(manager)),
@@ -110,9 +111,9 @@ pub mod linux {
 
     pub(super) fn runtime_config(
         config: &AppConfig,
-        settings: &SelfUpdateConfig,
         source: UpdateSource,
     ) -> Result<RuntimeConfig> {
+        let settings = &config.self_update;
         let directory = settings
             .directory
             .as_deref()
@@ -150,10 +151,11 @@ pub mod linux {
 
     pub fn dispatch_admin(config: &AppConfig, arguments: &[String]) -> Result<()> {
         use std::os::unix::process::CommandExt;
-        if let Some(settings) = &config.self_update
-            && settings.mode == SelfUpdateMode::Supervisor
+        let settings = &config.self_update;
+        if settings.mode == SelfUpdateMode::Supervisor
+            && let Some(manifest_url) = settings.parsed_manifest_url()?
         {
-            let runtime = runtime_config(config, settings, source(settings))?;
+            let runtime = runtime_config(config, source(&manifest_url))?;
             if let Some(active) = runtime::active_executable(&runtime)?
                 && active != runtime.executable
             {

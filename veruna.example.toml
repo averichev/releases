@@ -41,8 +41,9 @@ public_base_url = ""
 delivery_mode = "direct" # nginx requires deploy/nginx/veruna.conf
 max_concurrent_downloads = 64
 
-# Обновления самого Veruna Releases. Без секции проверка источника выключена.
+# Проверка обновлений Veruna Releases использует официальный манифест по умолчанию.
 # [self_update]
-# manifest_url = "https://updates.example.org/releases/manifest.json"
+# manifest_url = "https://app.releases.veruna.systems/releases/manifest.json"
+# Укажите URL зеркала или пустую строку для отключения проверки в режиме external.
 # mode = "external" # только проверка; для установки на Linux: supervisor или standalone
 # directory = "/var/lib/veruna-releases/updates" # отдельный приватный каталог для установки

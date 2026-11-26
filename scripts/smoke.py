@@ -106,6 +106,9 @@ def main():
             secret_values.append(csrf)
             me, _ = call("/api/v1/auth/me")
             assert me["user"]["username"] == "owner" and "password_hash" not in me["user"]
+            updates, _ = call("/api/v1/admin/self-update")
+            assert updates["mode"] == "external" and updates["installation_supported"] is False, updates
+            assert updates["status"]["state"] == "idle" and updates["status"]["last_checked"] is None, updates
             call("/api/v1/auth/logout", "POST", expected=403)  # no CSRF
             users, _ = call("/api/v1/admin/users")
             assert len(users) == 1

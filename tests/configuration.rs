@@ -1,7 +1,9 @@
 use std::{collections::HashMap, fs};
 
 use tempfile::tempdir;
-use veruna_releases::config::AppConfig;
+use veruna_releases::config::{AppConfig, SelfUpdateMode};
+
+const OFFICIAL_MANIFEST: &str = "https://app.releases.veruna.systems/releases/manifest.json";
 
 #[test]
 fn defaults_work_without_a_file() {
@@ -11,19 +13,18 @@ fn defaults_work_without_a_file() {
     assert!(config.server.open_browser);
     assert!(config.auth.public_origin.is_empty());
     assert!(config.download.public_base_url.is_empty());
-    assert!(config.self_update.is_none());
+    assert_eq!(config.self_update.manifest_url, OFFICIAL_MANIFEST);
+    assert_eq!(config.self_update.mode, SelfUpdateMode::External);
     assert_eq!(config.database.path.to_str(), Some("data/veruna.sqlite"));
 }
 
 #[test]
 fn update_source_enables_check_only_and_invalid_installation_settings_fail_early() {
-    use veruna_releases::config::SelfUpdateMode;
     let manifest = "https://updates.example.org/channel/manifest.json";
     let mut env = HashMap::from([("SELF_UPDATE__MANIFEST_URL".into(), manifest.into())]);
     let update = AppConfig::from_sources(None, env.clone())
         .unwrap()
-        .self_update
-        .unwrap();
+        .self_update;
     assert_eq!(update.mode, SelfUpdateMode::External);
     assert_eq!(update.manifest_url.as_str(), manifest);
     for invalid in [
@@ -46,6 +47,29 @@ fn update_source_enables_check_only_and_invalid_installation_settings_fail_early
     env.insert("SELF_UPDATE__DIRECTORY".into(), "data/updates".into());
     env.insert("SERVER__BIND".into(), "127.0.0.1:0".into());
     assert!(AppConfig::from_sources(None, env).is_err());
+}
+
+#[tokio::test]
+async fn self_update_manifest_can_be_overridden_or_disabled() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("veruna.toml");
+    fs::write(&path, "[self_update]\nmode = 'external'\n").unwrap();
+    let config = AppConfig::from_sources(Some(&path), HashMap::new()).unwrap();
+    assert_eq!(config.self_update.manifest_url, OFFICIAL_MANIFEST);
+
+    let mirror = "https://mirror.example.org/releases/manifest.json";
+    fs::write(&path, format!("[self_update]\nmanifest_url = '{mirror}'\n")).unwrap();
+    let config = AppConfig::from_sources(Some(&path), HashMap::new()).unwrap();
+    assert_eq!(config.self_update.manifest_url, mirror);
+
+    let mut env = HashMap::from([("SELF_UPDATE__MANIFEST_URL".into(), String::new())]);
+    let config = AppConfig::from_sources(Some(&path), env.clone()).unwrap();
+    let updates = veruna_releases::infrastructure::self_update::launch(&config, &[])
+        .await
+        .unwrap();
+    assert!(updates.summary().await.unwrap().mode.is_none());
+    env.insert("SELF_UPDATE__MODE".into(), "supervisor".into());
+    assert!(AppConfig::from_sources(Some(&path), env).is_err());
 }
 
 #[test]

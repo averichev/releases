@@ -67,7 +67,7 @@ DEV_API_TARGET=http://127.0.0.1:9090 npm --prefix frontend run dev
 
 ## Конфигурация
 
-Приоритет: встроенные значения → `veruna.toml` → переменные `SERVER__…`, `DATABASE__…`, `STORAGE__…`, `LOGGING__…`, `AUTH__…`, `DOWNLOAD__…`. Конфигурационный файл необязателен; скопируйте `veruna.example.toml` в `veruna.toml`, если нужна локальная настройка. `.env` автоматически не загружается.
+Значения из `veruna.toml` переопределяют встроенные настройки. Переменные окружения `SERVER__…`, `DATABASE__…`, `STORAGE__…`, `LOGGING__…`, `AUTH__…`, `DOWNLOAD__…` и `SELF_UPDATE__…` имеют высший приоритет. Скопируйте `veruna.example.toml` в `veruna.toml`, если нужна локальная настройка. `.env` автоматически не загружается.
 
 Можно выбрать другой TOML-файл:
 
@@ -99,8 +99,8 @@ CONFIG=/etc/veruna/releases.toml ./target/release/veruna-releases
 | `download.public_base_url` | `DOWNLOAD__PUBLIC_BASE_URL` | автоматически из запроса |
 | `download.delivery_mode` | `DOWNLOAD__DELIVERY_MODE` | `direct` |
 | `download.max_concurrent_downloads` | `DOWNLOAD__MAX_CONCURRENT_DOWNLOADS` | `64` |
-| `self_update.manifest_url` | `SELF_UPDATE__MANIFEST_URL` | источник отключён |
-| `self_update.mode` | `SELF_UPDATE__MODE` | `external` при заданном источнике |
+| `self_update.manifest_url` | `SELF_UPDATE__MANIFEST_URL` | `https://app.releases.veruna.systems/releases/manifest.json` |
+| `self_update.mode` | `SELF_UPDATE__MODE` | `external` |
 | `self_update.directory` | `SELF_UPDATE__DIRECTORY` | задаётся для установки на Linux |
 | `logging.filter` | `LOGGING__FILTER` | `info,tower_http=info` |
 
@@ -190,7 +190,7 @@ dist/releases/0.2.0/
 
 ### Обновление установленного сервиса
 
-В разделе **Обновление сервиса** администратор может проверить подписанный выпуск Veruna Releases. На Linux доступны подготовка, установка с перезапуском и откат бинарника при сбое готовности. На Windows и macOS установка выполняется вручную. Включите источник секцией `[self_update]` в `veruna.toml`, указав файл с доверенным публичным ключом и адресами издателя. По умолчанию самообновление выключено. [Настройка, публикация и восстановление](docs/self-update.md).
+В разделе **Обновление сервиса** нажмите **Проверить обновления**. Сервис запросит официальный манифест и проверит подпись выпуска встроенным ключом издателя. По умолчанию установка выполняется вручную. На Linux можно включить подготовку, установку с перезапуском и откат при сбое готовности. Для другого источника задайте `self_update.manifest_url` в `veruna.toml` или `SELF_UPDATE__MANIFEST_URL` в окружении. В режиме `external` пустой адрес отключает проверку. [Настройка, публикация и восстановление](docs/self-update.md).
 
 ### Запуск через «Мой хост»
 
